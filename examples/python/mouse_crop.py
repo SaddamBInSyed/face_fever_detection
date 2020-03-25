@@ -36,7 +36,20 @@ def mouse_crop(image_np,image_raw, num_of_crop):
             refPoint = [(x_start, y_start), (x_end, y_end)]
 
             if len(refPoint) == 2:  # when two points were found
-                roi.append(imageRaw[refPoint[0][1]:refPoint[1][1], refPoint[0][0]:refPoint[1][0]])
+
+                if x_start > x_end:
+                    tmp = x_start
+                    x_start = x_end
+                    x_end = tmp
+
+                if y_start > y_end:
+                    tmp = y_start
+                    x_start = y_end
+                    y_end = tmp
+
+
+                # roi.append(imageRaw[refPoint[0][1]:refPoint[1][1], refPoint[0][0]:refPoint[1][0]])
+                roi.append(imageRaw[y_start:y_end, x_start:x_end])
                 coordinates.append([x_start, y_start, x_end, y_end])
                 #cv2.imshow("Cropped", roi[-1])
                 FinishROI += 1
