@@ -29,7 +29,7 @@ examples/RetinaFace/models
 cd /examples/RetinaFace
 make
 ```
-**** make sure to copy the cv2 and cv2.so from native python (``/usr/lib/python2.7/dist-packages``) to ``venv_27/lib/python2.7/site-packages/`` ****
+- make sure to copy the cv2 and cv2.so from native python (``/usr/lib/python2.7/dist-packages``) to ``venv_27/lib/python2.7/site-packages/``
 6. open new terminal window and run:
 ```
 sudo bin/erop-proxy-cam -nproxycam-ir --perror --logmask=130
