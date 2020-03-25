@@ -1,0 +1,8 @@
+# run frame grabber
+nano@jetson-nano:/opt/eyerop/examples/ipccap$ ./run_erop.sh           
+
+# run frame capture
+nano@jetson-nano:/opt/eyerop/examples/ipccap$ sudo ./ipccap /ipc0 -d  
+
+# show one frame with opencv
+nano@jetson-nano:/opt/eyerop/examples/ipccap$ python showcv.py '/opt/eyerop/dump/frame_1211.bin'

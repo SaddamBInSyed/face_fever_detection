@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ChangeListManager">
+    <list default="true" id="8c062a3c-8392-4dd5-bca4-3f6b70ba2258" name="Default Changelist" comment="" />
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="ProjectId" id="1ZA5DI3DpWMEaOX3a1zi4GkIe03" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showExcludedFiles" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent">
+    <property name="RunOnceActivity.ShowReadmeOnStart" value="true" />
+    <property name="last_opened_file_path" value="$PROJECT_DIR$/../../Pytorch_Retinaface" />
+    <property name="settings.editor.selected.configurable" value="com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable" />
+  </component>
+  <component name="RunManager">
+    <configuration name="capture_opencv" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="examples" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/python" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/python/capture_opencv.py" />
+      <option name="PARAMETERS" value="/ipc0 -d -o $USER_HOME$/Desktop/thermapp_testing/" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <recent_temporary>
+      <list>
+        <item itemvalue="Python.capture_opencv" />
+      </list>
+    </recent_temporary>
+  </component>
+  <component name="SvnConfiguration">
+    <configuration />
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="8c062a3c-8392-4dd5-bca4-3f6b70ba2258" name="Default Changelist" comment="" />
+      <created>1584268937154</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1584268937154</updated>
+    </task>
+    <servers />
+  </component>
+  <component name="WindowStateProjectService">
+    <state x="332" y="141" key="#com.intellij.execution.impl.EditConfigurationsDialog" timestamp="1584273748142">
+      <screen x="65" y="24" width="1855" height="1056" />
+    </state>
+    <state x="332" y="141" key="#com.intellij.execution.impl.EditConfigurationsDialog/65.24.1855.1056@65.24.1855.1056" timestamp="1584273748142" />
+    <state x="467" y="395" width="424" height="454" key="FileChooserDialogImpl" timestamp="1584288562581">
+      <screen x="65" y="24" width="1855" height="1056" />
+    </state>
+    <state x="467" y="395" width="424" height="454" key="FileChooserDialogImpl/65.24.1855.1056@65.24.1855.1056" timestamp="1584288562581" />
+    <state width="688" height="334" key="GridCell.Tab.0.bottom" timestamp="1584274680473">
+      <screen x="65" y="24" width="1855" height="1056" />
+    </state>
+    <state width="688" height="334" key="GridCell.Tab.0.bottom/65.24.1855.1056@65.24.1855.1056" timestamp="1584274680473" />
+    <state width="688" height="334" key="GridCell.Tab.0.center" timestamp="1584274680465">
+      <screen x="65" y="24" width="1855" height="1056" />
+    </state>
+    <state width="688" height="334" key="GridCell.Tab.0.center/65.24.1855.1056@65.24.1855.1056" timestamp="1584274680465" />
+    <state width="688" height="334" key="GridCell.Tab.0.left" timestamp="1584274680464">
+      <screen x="65" y="24" width="1855" height="1056" />
+    </state>
+    <state width="688" height="334" key="GridCell.Tab.0.left/65.24.1855.1056@65.24.1855.1056" timestamp="1584274680464" />
+    <state width="688" height="334" key="GridCell.Tab.0.right" timestamp="1584274680466">
+      <screen x="65" y="24" width="1855" height="1056" />
+    </state>
+    <state width="688" height="334" key="GridCell.Tab.0.right/65.24.1855.1056@65.24.1855.1056" timestamp="1584274680466" />
+    <state width="688" height="334" key="GridCell.Tab.1.bottom" timestamp="1584274680479">
+      <screen x="65" y="24" width="1855" height="1056" />
+    </state>
+    <state width="688" height="334" key="GridCell.Tab.1.bottom/65.24.1855.1056@65.24.1855.1056" timestamp="1584274680479" />
+    <state width="688" height="334" key="GridCell.Tab.1.center" timestamp="1584274680476">
+      <screen x="65" y="24" width="1855" height="1056" />
+    </state>
+    <state width="688" height="334" key="GridCell.Tab.1.center/65.24.1855.1056@65.24.1855.1056" timestamp="1584274680476" />
+    <state width="688" height="334" key="GridCell.Tab.1.left" timestamp="1584274680475">
+      <screen x="65" y="24" width="1855" height="1056" />
+    </state>
+    <state width="688" height="334" key="GridCell.Tab.1.left/65.24.1855.1056@65.24.1855.1056" timestamp="1584274680475" />
+    <state width="688" height="334" key="GridCell.Tab.1.right" timestamp="1584274680477">
+      <screen x="65" y="24" width="1855" height="1056" />
+    </state>
+    <state width="688" height="334" key="GridCell.Tab.1.right/65.24.1855.1056@65.24.1855.1056" timestamp="1584274680477" />
+    <state x="179" y="203" key="SettingsEditor" timestamp="1584274675922">
+      <screen x="65" y="24" width="1855" height="1056" />
+    </state>
+    <state x="179" y="203" key="SettingsEditor/65.24.1855.1056@65.24.1855.1056" timestamp="1584274675922" />
+    <state x="648" y="463" key="com.intellij.ide.util.TipDialog" timestamp="1584288548830">
+      <screen x="65" y="24" width="1855" height="1056" />
+    </state>
+    <state x="648" y="463" key="com.intellij.ide.util.TipDialog/65.24.1855.1056@65.24.1855.1056" timestamp="1584288548830" />
+  </component>
+  <component name="XDebuggerManager">
+    <breakpoint-manager>
+      <breakpoints>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/python/capture_opencv.py</url>
+          <line>10</line>
+          <option name="timeStamp" value="1" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/python/capture_opencv.py</url>
+          <line>156</line>
+          <option name="timeStamp" value="5" />
+        </line-breakpoint>
+      </breakpoints>
+    </breakpoint-manager>
+  </component>
+</project>
