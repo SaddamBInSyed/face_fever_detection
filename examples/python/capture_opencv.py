@@ -30,6 +30,9 @@ r_ratio = 0.75
 t_ratio = 0.1
 b_ratio = 0.3  # 0.35
 
+temp_measure_type = 'precentile' # 'median'
+FACE_TEMP_PRECENTILE = [0.8, 0.95]
+
 colormap = None
 # colormap = 2 # JET
 
@@ -91,6 +94,8 @@ def main():
         print("Dump path      {}".format(g_dumpPath))
         try:
             os.mkdir(g_dumpPath)
+            g_dumpPath_display = os.path.join(g_dumpPath, 'display')
+            os.mkdir(g_dumpPath_display)
         except:
             import traceback;
             traceback.print_exc()
@@ -242,7 +247,10 @@ def main():
                 else:
                     color = (255, 0, 0)
                     left, top, right, bottom = coor[0]
-                    ref_temp_raw = np.median(im_raw[top:bottom, left:right, 0])
+                    if temp_measure_type == 'median':
+                        ref_temp_raw = np.median(im_raw[top:bottom, left:right, 0])
+                    else:
+                        ref_temp_raw = calc_precentile(im_raw[top:bottom, left:right, 0], q_min=FACE_TEMP_PRECENTILE[0], q_max=FACE_TEMP_PRECENTILE[1])
                     cv2.rectangle(im_plot, (2 * left, 2 * top), (2 * right, 2 * bottom), color, 3)
                     ref_temp = (ref_temp_raw - B) / (BLACK_BODY_EMISSIVITY * A)
                     color = (0, 255, 0)
@@ -251,7 +259,11 @@ def main():
 
                     color = (255, 0, 0)
                     left, top, right, bottom = coor[1]
-                    ref_temp_raw = np.median(im_raw[top:bottom, left:right, 0])
+                    if temp_measure_type == 'median':
+                        ref_temp_raw = np.median(im_raw[top:bottom, left:right, 0])
+                    else:
+                        ref_temp_raw = calc_precentile(im_raw[top:bottom, left:right, 0], q_min=FACE_TEMP_PRECENTILE[0], q_max=FACE_TEMP_PRECENTILE[1])
+
                     cv2.rectangle(im_plot, (2 * left, 2 * top), (2 * right, 2 * bottom), color, 3)
                     ref_temp = (ref_temp_raw - B) / (BLACK_BODY_EMISSIVITY * A)
                     color = (0, 255, 0)
@@ -296,22 +308,37 @@ def main():
                         ver_start_draw = int(top_draw + t_ratio * h_draw)
                         ver_end_draw = int(top_draw + b_ratio * h_draw)
 
-                        cv2.rectangle(im_plot, (hor_start_draw, ver_start_draw), (hor_end_draw, ver_end_draw),
-                                      (255, 255, 255), 2)
-
                         # for temparture calculation - use raw image
                         top = box[1]
                         left = box[0]
+                        bottom = box[3]
+                        right = box[2]
 
                         w = box[2] - box[0]
                         h = box[3] - box[1]
 
-                        hor_start = int(left + l_ratio * w)
-                        hor_end = int(left + r_ratio * w)
-                        ver_start = int(top + t_ratio * h)
-                        ver_end = int(top + b_ratio * h)
+                        if temp_measure_type == 'median':
 
-                        temp_raw = np.median(im_raw[ver_start:ver_end, hor_start:hor_end, 0])
+                            hor_start = int(left + l_ratio * w)
+                            hor_end = int(left + r_ratio * w)
+                            ver_start = int(top + t_ratio * h)
+                            ver_end = int(top + b_ratio * h)
+
+                            temp_raw = np.median(im_raw[ver_start:ver_end, hor_start:hor_end, 0])
+
+                            # display rectangle on forehead
+                            cv2.rectangle(im_plot, (hor_start_draw, ver_start_draw), (hor_end_draw, ver_end_draw),
+                                          (255, 255, 255), 2)
+
+                        else:
+
+                            hor_start = int(left)
+                            hor_end = int(right)
+                            ver_start = int(top)
+                            ver_end = int(bottom)
+
+                            temp_raw = calc_precentile(im_raw[ver_start:ver_end, hor_start:hor_end, 0], q_min=FACE_TEMP_PRECENTILE[0], q_max=FACE_TEMP_PRECENTILE[1])
+
                         # a= 1.0/(FACE_EMISSIVITY*A)
                         # b= B*FACE_EMISSIVITY*a
                         # temp_raw = temp_raw/FACE_EMISSIVITY
@@ -348,9 +375,12 @@ def main():
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
             if g_dumpFiles:
-                frame_name = os.path.join(g_dumpPath, "frame_{}.tiff".format(thermapp.imageId))
+                frame_name = os.path.join(g_dumpPath, "{}.tiff".format(thermapp.imageId))
                 print("save image: {}".format(frame_name))
                 cv2.imwrite(frame_name, im_raw)
+
+                frame_name = os.path.join(g_dumpPath_display, "{}.jpg".format(thermapp.imageId))
+                cv2.imwrite(frame_name, im_plot)
 
             frame_count += 1  # captured frames counter
 
@@ -449,6 +479,22 @@ def calc_image_pattern(dirname):
     img_pattern_mean_subtracted = img_mean - np.mean(img_mean)
 
     return img_mean, img_pattern_mean_subtracted
+
+def calc_precentile(x, q_min=0.8, q_max=0.95):
+
+    x_sorterd = np.sort(x.flatten())
+
+    N = len(x_sorterd) - 1
+
+    ind_min = int(np.floor(q_min * N))
+    ind_max = int(np.floor(q_max * N))
+
+    if ind_min < ind_max:
+        y = np.mean(x_sorterd[ind_min:ind_max])
+    else:
+        y = x_sorterd[ind_max]
+
+    return y
 
 
 if __name__ == '__main__':
