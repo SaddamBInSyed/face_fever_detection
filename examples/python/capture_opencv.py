@@ -542,7 +542,7 @@ try:
 
             cv2.imshow('image', im_plot)
 
-            if frame_count == 0:
+            if DETECT_CURSUR_TEMP and (frame_count == 0):
                 cv2.setMouseCallback('image', get_mouse_loc)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
