@@ -19,11 +19,14 @@ from time import sleep
 
 FACE_DETECTION_THRESH = 0.2
 TEMPERATURE_THRESH = 38.
-FACE_EMISSIVITY = 0.90 # 0.92  # 0.98
+FACE_EMISSIVITY = 0.98 # 0.92  # 0.98
 BLACK_BODY_EMISSIVITY = 1.0
-BLACK_BODY_TEMP = [36.0, 38.0]
-SUVID_EMISSIVITY = 1.0 # 0.98
-SUVID_TEMP = 37.0
+BLACK_BODY_TEMP = [32., 35.] # [36.0, 39.0]
+# SUVID_EMISSIVITY = 0.9866 * BLACK_BODY_EMISSIVITY #
+SUVID_EMISSIVITY = 1. * BLACK_BODY_EMISSIVITY #
+SUVID_TEMP_NOMINAL = 35.0 #37.0
+SUVID_BIAS = 0 #0.8 # 0.8
+SUVID_TEMP = SUVID_TEMP_NOMINAL + SUVID_BIAS
 IM_SHAPE=[384,288,3]
 A = 0.01176
 B = -2.0
@@ -33,18 +36,31 @@ r_ratio = 0.75
 t_ratio = 0.1
 b_ratio = 0.3  # 0.35
 
-temp_measure_type = 'precentile' # 'median'
-FACE_TEMP_PRECENTILE = [0.8, 0.95]
+temp_measure_type = 'median' #'precentile' # 'median'
+FACE_TEMP_PRECENTILE = [0.8, 1.0]
 
 DETECT_CURSUR_TEMP = False
 
 colormap = None
 # colormap = 2 # JET
 
-USE_BLACK_BODY = True
+CALIBRATE_FROM_FILE = False #False # False - calibrate form teo black body
+ONLINE_CALIBRATION = 'SUVID' # 'BLACK_BODY'
+ONETIME_CALIBRATE_DONE = False
+
 scales = [1024, 1980]
 
-calibrate_black_body_from_file = True
+name ='/ipc0'
+g_calib_black_body = True
+g_dumpFiles = False
+# g_log2Length = args.l
+g_showPic = True
+g_dumpPath = '/home/nvidia/Documents/fever_det/'
+g_drawGraph = True  # showing the pic implies not drawing the graph
+
+# get image pattern for NUC
+subtract_image_pattern = True
+dirname = r'/home/nvidia/Documents/fever_det/2020_29_03__18_36_23_NUC_pattern_estimation'
 
 count = 1
 gpuid = 0
@@ -60,7 +76,8 @@ else:
 
 
 def calib_black_body(im, im_raw, num_of_body=2):
-    R = mouse_crop.mouse_crop(image_np=im, image_raw=im_raw, num_of_crop=num_of_body)
+    R = mouse_crop.mouse_crop(image_np=im, image_raw=im_raw, num_of_crop=num_of_body,
+                              text='Select 2 black bodies, first with lower temperature')
     GL_mean = []
     for crop in R[0]:
         GL_mean.append(crop.mean())
@@ -71,7 +88,23 @@ def calib_black_body(im, im_raw, num_of_body=2):
     coor = R[1]
 
     calib_params={'BLACK_BODY_TEMP':BLACK_BODY_TEMP, 'A':A, 'B':B}
-    np.save('calib_params.npy',calib_params)
+    np.save('calibration_params/calib_params.npy',calib_params)
+
+    fname = 'calibration_params/calib_params.txt'
+    if not os.path.exists(fname):
+        with open(fname, 'a') as f:
+            header_str = 'Date-Time, temp1, temp2, emissivity, gray_level1, gray_level2, A, B\n'
+            f.write(header_str)
+
+    with open(fname, 'a') as f:
+        data_str = '{}, {}, {}, {}, {}, {}, {}, {}\n'.format(datetime.datetime.now().strftime('%Y_%d_%m__%H_%M_%S'), BLACK_BODY_TEMP[0], BLACK_BODY_TEMP[1], BLACK_BODY_EMISSIVITY, GL_mean[0], GL_mean[1], A, B)
+        f.write(data_str)
+
+    fname = 'calibration_params/calib_params_{}.npy'.format(datetime.datetime.now().strftime('%Y_%d_%m__%H_%M_%S'))
+    np.save(fname, calib_params)
+
+    # np.savetext('calib_params.txt')
+    # g_dumpPath = os.path.join(g_dumpPath, datetime.datetime.now().strftime('%Y_%d_%m__%H_%M_%S'))
     return A, B, coor
 
 def calib_offset_online(crop):
@@ -197,18 +230,8 @@ def get_mouse_loc(event,x,y,flags,param):
 
     # args = parser.parse_args()
 
-name ='/ipc0'
-g_calib_black_body = True
-g_dumpFiles = False
-# g_log2Length = args.l
-g_showPic = True
-g_dumpPath = '/home/nvidia/Documents/fever_det/'
-g_drawGraph = True  # showing the pic implies not drawing the graph
-
-# get image pattern for NUC
-subtract_image_pattern = True
-dirname = r'/home/nvidia/Documents/fever_det/2020_25_03__17_35_50'
 img_mean, img_pattern_mean_subtracted = calc_image_pattern(dirname)
+
 
 print("Params:")
 print("name:          {}".format(name))
@@ -220,6 +243,8 @@ if g_dumpFiles:
         os.mkdir(g_dumpPath)
         g_dumpPath_display = os.path.join(g_dumpPath, 'display')
         os.mkdir(g_dumpPath_display)
+        g_dumpPath_png = os.path.join(g_dumpPath, 'png_im')
+        os.mkdir(g_dumpPath_png)
     except:
         import traceback;
         traceback.print_exc()
@@ -306,7 +331,7 @@ try:
             img_st = data[64:]
             rgb = np.frombuffer(img_st, dtype=np.uint16).reshape(thermapp.imageHeight, thermapp.imageWidth)
             if subtract_image_pattern:
-                rgb = rgb - img_pattern_mean_subtracted
+                rgb = (rgb - img_pattern_mean_subtracted).astype(np.uint16)
             # rgb = np.rot90(rgb,3)
             # rgb = np.uint8(rgb)
 
@@ -316,21 +341,26 @@ try:
             im = im.astype('float')
             im = (im / (im.max()) * 255).astype('uint8')
 
-            if g_calib_black_body:
-                g_calib_black_body = False
+            if not ONETIME_CALIBRATE_DONE: # first time calibration setup
 
-                if calibrate_black_body_from_file:
+                ONETIME_CALIBRATE_DONE = True
 
-                    calib_params = np.load('calib_params.npy', allow_pickle=True)
+                if CALIBRATE_FROM_FILE:  # calibrate from file
+                    calib_params = np.load('calibration_params/calib_params.npy', allow_pickle=True)
                     calib_params = calib_params.flatten()[0]
                     A = calib_params['A']
                     B = calib_params['B']
-
-                    R = mouse_crop.mouse_crop(image_np=im, image_raw=im_raw, num_of_crop=1)
-                    coor = R[1]
-
-                else:
+                else: # calibrate from image taken now
                     A, B, coor = calib_black_body(im=im, im_raw=im_raw, num_of_body=2)
+                    coor_black_body = coor
+
+
+                if ONLINE_CALIBRATION== 'SUVID':
+                    R = mouse_crop.mouse_crop(image_np=im, image_raw=im_raw, num_of_crop=1,
+                                              text='Select reference object (Suvid)')
+                    coor_suvid = R[1]
+
+
 
             scales = [1024, 1980]
 
@@ -360,30 +390,27 @@ try:
             end_t = time.time()
             print(faces.shape, landmarks.shape, end_t - start_t)
 
-            # detect black body
-            # top, left, bottom, right, rect_est = detect_rectangle(im_raw.astype('uint8')).
-            rect_est = None
-            # top, left, bottom, right, rect_est = detect_rectangle(im)
+            if not CALIBRATE_FROM_FILE: # show temperature of black body
 
-            if rect_est is not None:
-                dh = bottom - top
-                dw = right - left
-                hh = 0.1
-                # cv2.drawContours(im_plot, 2*[rect_est], 0, (255, 255, 0), 2)
-                ref_temp_raw = np.mean(
-                    im_raw[int(top + hh * dh):int(bottom - hh * dh), int(left + hh * dw):int(right - hh * dw), 0])
-                print('black body found!, {}'.format(ref_temp_raw))
-                status_text = 'black body found'
-                color = (0, 255, 0)
-                cv2.rectangle(im_plot, (2 * int(left + hh * dw), 2 * int(top + hh * dh)),
-                              (2 * int(right - hh * dw), 2 * int(bottom - hh * dh)), color, 3)
-                cv2.rectangle(im_plot, (2 * left, 2 * top), (2 * right, 2 * bottom), color, 3)
+                for c in coor_black_body:
 
+                    color = (255, 0, 0)
+                    left, top, right, bottom = c
+                    # if temp_measure_type == 'median':
+                    #     ref_temp_raw = np.median(im_raw[top:bottom, left:right, 0])
+                    # else:
+                    #     ref_temp_raw = calc_precentile(im_raw[top:bottom, left:right, 0], q_min=FACE_TEMP_PRECENTILE[0],
+                    #                                    q_max=FACE_TEMP_PRECENTILE[1])
 
-            else:
+                    ref_temp_raw = np.mean(im_raw[top:bottom, left:right, 0])
+                    ref_temp = (ref_temp_raw - B) / (BLACK_BODY_EMISSIVITY * A)
+                    cv2.rectangle(im_plot, (2 * left, 2 * top), (2 * right, 2 * bottom), color, 3)
+                    color = (0, 255, 0)
+                    cv2.putText(im_plot, '{}'.format(np.round(ref_temp, 1)), (2 * left, 2 * top - 20), font, 2, color, 3)
 
-                for c in coor:
+            if ONLINE_CALIBRATION: # show temperature of suvid, and estimate B
 
+                for c in coor_suvid:
                     color = (255, 0, 0)
                     left, top, right, bottom = c
                     # if temp_measure_type == 'median':
@@ -396,11 +423,13 @@ try:
 
                     B = ref_temp_raw - SUVID_EMISSIVITY * A * SUVID_TEMP
 
-                    ref_temp = (ref_temp_raw - B) / (BLACK_BODY_EMISSIVITY * A)
+                    ref_temp = (ref_temp_raw - B) / (SUVID_EMISSIVITY * A) 
+
                     cv2.rectangle(im_plot, (2 * left, 2 * top), (2 * right, 2 * bottom), color, 3)
                     color = (0, 255, 0)
                     cv2.putText(im_plot, '{}'.format(np.round(ref_temp, 1)), (2 * left, 2 * top - 20), font, 2, color,
                                 3)
+
 
                 # color = (255, 0, 0)
                 # left, top, right, bottom = coor[0]
@@ -441,8 +470,8 @@ try:
             # cv2.rectangle(im_plot, (2 * left, 2 * top), (2 * right, 2 * bottom), color, 3)
             # )
 
-            cv2.putText(im_plot, status_text, (10, 10), font, 3,
-                        color, 3)
+            # cv2.putText(im_plot, status_text, (10, 10), font, 3,
+            #             color, 3)
 
             if faces is not None and len(faces) > 0:
                 print('find', faces.shape[0], 'faces')
@@ -501,7 +530,7 @@ try:
                     # temp_raw = temp_raw/FACE_EMISSIVITY
                     temp = (temp_raw - B) / (FACE_EMISSIVITY * A)
 
-                    temp += 1 # FIXME!!!
+                    # temp += 1 # FIXME!!!
                     # temp =(temp_raw-B)/(BLACK_BODY_EMISSIVITY*A) # FIXME!!!!
 
                     # temp = (temp_raw - 14336) * 0.00652 +110.7
@@ -533,14 +562,15 @@ try:
                     # cv2.circle(im, (landmark5[2][0], landmark5[2][1]), 1, color, 2)
 
             # mouse temperature
-            mouse_x = int(0.5 * mouseX)
-            mouse_y = int(0.5 * mouseY)
-            mouse_radius = 3
-            temp_mouse_raw = np.mean(im_raw[(mouse_y-mouse_radius):(mouse_y+mouse_radius), (mouse_x-mouse_radius):(mouse_x+mouse_radius), 0])
-            temp_mouse = (temp_mouse_raw - B) / (BLACK_BODY_EMISSIVITY * A)
-            temp_mouse_text = 'Cursur Temperatur: {}'.format(np.round(temp_mouse, 1))
-            color = (0, 255, 0)
-            cv2.putText(im_plot, temp_mouse_text, (10, 50), font, 3, color, 3)
+            if DETECT_CURSUR_TEMP:
+                mouse_x = int(0.5 * mouseX)
+                mouse_y = int(0.5 * mouseY)
+                mouse_radius = 3
+                temp_mouse_raw = np.mean(im_raw[(mouse_y-mouse_radius):(mouse_y+mouse_radius), (mouse_x-mouse_radius):(mouse_x+mouse_radius), 0])
+                temp_mouse = (temp_mouse_raw - B) / (BLACK_BODY_EMISSIVITY * A)
+                temp_mouse_text = 'Cursur Temperatur: {}'.format(np.round(temp_mouse, 1))
+                color = (0, 255, 0)
+                cv2.putText(im_plot, temp_mouse_text, (10, 50), font, 3, color, 3)
 
 
             cv2.imshow('image', im_plot)
@@ -555,7 +585,11 @@ try:
             print("save image: {}".format(frame_name))
             cv2.imwrite(frame_name, im_raw)
 
-            frame_name = os.path.join(g_dumpPath_display, "{}.jpg".format(thermapp.imageId))
+            frame_name = os.path.join(g_dumpPath_png, "{}.png".format(thermapp.imageId))
+            print("save image: {}".format(frame_name))
+            cv2.imwrite(frame_name, im)
+
+            frame_name = os.path.join(g_dumpPath_display, "{}.png".format(thermapp.imageId))
             cv2.imwrite(frame_name, im_plot)
 
         frame_count += 1  # captured frames counter

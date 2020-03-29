@@ -11,7 +11,16 @@ image = None
 oriImage = None
 
 
-def mouse_crop(image_np,image_raw, num_of_crop):
+def mouse_crop(image_np,image_raw, num_of_crop, text=''):
+
+    global x_start, y_start, x_end, y_end, cropping, roi, FinishROI, coordinates
+
+    cropping = False
+    FinishROI = 0
+    roi = []
+    coordinates = []
+    x_start, y_start, x_end, y_end = 0, 0, 0, 0
+
     def mouse_crop_aux(event, x, y, flags, param):
         # grab references to the global variables
         global x_start, y_start, x_end, y_end, cropping, roi, FinishROI, coordinates
@@ -60,6 +69,11 @@ def mouse_crop(image_np,image_raw, num_of_crop):
     oriImage = image.copy()
     imageRaw = image_raw.copy()
     cv2.namedWindow("image")
+
+    font = cv2.FONT_HERSHEY_PLAIN
+    color = (0, 255, 0)
+    cv2.putText(image, text, (10, 50), font, 1, color, 3)
+
     cv2.imshow("image", image)
 
     while FinishROI<num_of_crop:
