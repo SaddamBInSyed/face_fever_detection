@@ -18,12 +18,12 @@ import cv2
 from time import sleep
 
 FACE_DETECTION_THRESH = 0.2
-TEMPERATURE_THRESH = 37.
-FACE_EMISSIVITY = 0.94 # 0.92  # 0.98
+TEMPERATURE_THRESH = 38.
+FACE_EMISSIVITY = 0.90 # 0.92  # 0.98
 BLACK_BODY_EMISSIVITY = 1.0
 BLACK_BODY_TEMP = [36.0, 38.0]
 SUVID_EMISSIVITY = 1.0 # 0.98
-SUVID_TEMP = 37.5
+SUVID_TEMP = 37.0
 IM_SHAPE=[384,288,3]
 A = 0.01176
 B = -2.0
@@ -500,6 +500,8 @@ try:
                     # b= B*FACE_EMISSIVITY*a
                     # temp_raw = temp_raw/FACE_EMISSIVITY
                     temp = (temp_raw - B) / (FACE_EMISSIVITY * A)
+
+                    temp += 1 # FIXME!!!
                     # temp =(temp_raw-B)/(BLACK_BODY_EMISSIVITY*A) # FIXME!!!!
 
                     # temp = (temp_raw - 14336) * 0.00652 +110.7
@@ -515,8 +517,9 @@ try:
                         color = (0, 0, 255)
                     cv2.rectangle(im_plot, (box_draw[0], box_draw[1]), (box_draw[2], box_draw[3]), color, 3)
 
-                    cv2.putText(im_plot, '{}'.format(text_), (box_draw[0], box_draw[1] - 20), font, 2,
-                                color, 3)
+                    # cv2.putText(im_plot, '{}'.format(text_), (box_draw[0], box_draw[1] - 20), font, 2, color, 3)
+                    cv2.putText(im_plot, '{}'.format(text_), (box_draw[0], box_draw[1] - 20), font, 4, color, 3)
+
                     # cv2.putText(im_plot, "{:.1f}".format(temp), (box_draw[0], box_draw[1] - 20), font, 1,
                     #             color, 3)
                     # if landmarks is not None:
