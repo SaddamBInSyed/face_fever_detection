@@ -29,7 +29,7 @@ unzip examples/RetinaFace/models/retinaface-R50.zip -d examples/RetinaFace/model
 ```
 5. Compile additional source:
 ```
-cd /examples/RetinaFace
+cd examples/RetinaFace
 make
 ```
 - make sure to copy the cv2 and cv2.so from native python (``/usr/lib/python2.7/dist-packages``) to ``venv_27/lib/python2.7/site-packages/``
