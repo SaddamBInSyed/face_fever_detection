@@ -18,7 +18,9 @@ import cv2
 from time import sleep
 
 FACE_DETECTION_THRESH = 0.2
-TEMPERATURE_THRESH = 38.
+# TEMPERATURE_THRESH = 35.0 #38. # FIXME
+BODY_TO_SKIN_BIAS = 0. #1.5 #0. #2.2 # FIXME
+TEMPERATURE_THRESH = 35.0 + BODY_TO_SKIN_BIAS #38. # FIXME
 FACE_EMISSIVITY = 0.98 # 0.92  # 0.98
 BLACK_BODY_EMISSIVITY = 1.0
 BLACK_BODY_TEMP = [32., 35.] # [36.0, 39.0]
@@ -41,10 +43,10 @@ FACE_TEMP_PRECENTILE = [0.8, 1.0]
 
 DETECT_CURSUR_TEMP = False
 
-colormap = None
-# colormap = 2 # JET
+# colormap = None
+colormap = 2 # JET
 
-CALIBRATE_FROM_FILE = False #False # False - calibrate form teo black body
+CALIBRATE_FROM_FILE = True #False # False - calibrate form teo black body
 ONLINE_CALIBRATION = 'SUVID' # 'BLACK_BODY'
 ONETIME_CALIBRATE_DONE = False
 
@@ -529,6 +531,8 @@ try:
                     # b= B*FACE_EMISSIVITY*a
                     # temp_raw = temp_raw/FACE_EMISSIVITY
                     temp = (temp_raw - B) / (FACE_EMISSIVITY * A)
+
+                    temp += BODY_TO_SKIN_BIAS  #
 
                     # temp += 1 # FIXME!!!
                     # temp =(temp_raw-B)/(BLACK_BODY_EMISSIVITY*A) # FIXME!!!!
