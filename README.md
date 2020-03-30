@@ -31,6 +31,7 @@ unzip examples/RetinaFace/models/retinaface-R50.zip -d examples/RetinaFace/model
 ```
 cd examples/RetinaFace
 make
+cd -
 ```
 - make sure to copy the cv2 and cv2.so from native python (``/usr/lib/python2.7/dist-packages``) to ``venv_27/lib/python2.7/site-packages/``
 6. open new terminal window and run:
