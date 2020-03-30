@@ -1,0 +1,18 @@
+{
+    "packageType": "bin",
+    "files": [
+        { "name": "0.bin" , "length":152 },
+		{ "name": "1.bin" , "length":442368 },
+        { "name": "2.bin" , "length":442368 },
+        { "name": "3.bin" , "length":442368 },
+        { "name": "4.bin" , "length":442368 },
+        { "name": "5.bin" , "length":442368 },
+		{ "name": "6.bin" , "length":442368 },
+        { "name": "7.bin" , "length":442368 },
+        { "name": "8.bin" , "length":442368 },
+        { "name": "9.bin" , "length":442368 },
+        { "name": "10.bin" , "length":442368 },		
+        { "name": "11.bin" , "length":104 },
+        { "name": "FilesList.json" , "length":669 }
+    ]
+}
