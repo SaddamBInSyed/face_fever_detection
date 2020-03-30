@@ -54,11 +54,16 @@ source venv_27/bin/activate
 ```
 python -c "import cv2.aruco"
 ```
-10. open new terminal window and run:
+10. Copy camera configuration files:
+```
+sudo mkdir -p /etc/eyerop
+sudo cp -rf etc/* /etc/eyerop/
+```
+11. open new terminal window and run:
 ```
 sudo bin/erop-proxy-cam -nproxycam-ir --perror --logmask=130
 ```
-11. Run from ```examples/python```:
+12. Run from ```examples/python```:
 ```
  sudo ../../venv_27/bin/python  capture_opencv.py /ipc0
 ```
