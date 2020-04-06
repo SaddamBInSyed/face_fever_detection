@@ -2,11 +2,14 @@ import flask
 import random
 import base64
 import numpy as np
+import time
+import collections
 
 app = flask.Flask(__name__)
 app.config["DEBUG"] = True
 
 homepage = "<h1>REST-API Example</h1><p>This site is a prototype REST-API</p>"
+timings = collections.deque([],maxlen=5)
 
 @app.route('/', methods=['GET'])
 def home():
@@ -16,10 +19,16 @@ def home():
 @app.route("/predict", methods=["POST"])
 def predict():
     response = {'status': 'failure', 'msg': 'unknown'}
-    app.logger.info("got /predict request")
+    global timings
+    timings.append(time.time())
+    n_calls = len(timings)
+    t_total = timings[-1] - timings[0]
+    t_rate = n_calls / t_total if t_total != 0 else 0
+    app.logger.info("@/predict: last {} calls took {:.2f} seconds. Rate is {:.2f} Hz. (calls/second)".format(n_calls,
+                                                                                                     t_total,
+                                                                                                     t_rate))
     # ensure an image was properly uploaded to our endpoint
     if flask.request.method == "POST":
-        app.logger.info("got POST request")
         # read fields from the request (detect a form-encoded request):
         id = flask.request.form['id']
         width = flask.request.form['width']
