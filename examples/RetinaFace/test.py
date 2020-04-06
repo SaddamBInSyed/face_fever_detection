@@ -20,7 +20,7 @@ test_dataset = '/home/nvidia/Desktop/thermapp_testing/for pony/'
 num_images = len(os.listdir(test_dataset))
 test_dataset_list = os.listdir(test_dataset)
 for j, img_name in enumerate(test_dataset_list):
-  scales = [1024, 1980]
+  scales = [288, 384]
 
   image_path = test_dataset + img_name
   img = cv2.imread(image_path)
