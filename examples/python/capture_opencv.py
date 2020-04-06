@@ -1,7 +1,7 @@
 import signal
 import sys
 import time
-import pyipccap
+# import pyipccap
 import os
 import datetime
 import argparse
@@ -14,7 +14,7 @@ import mouse_crop
 import numpy as np
 
 import cv2
-
+#import pdb
 from time import sleep
 
 FACE_DETECTION_THRESH = 0.2
@@ -66,8 +66,46 @@ dirname = r'/home/nvidia/Documents/fever_det/2020_29_03__18_36_23_NUC_pattern_es
 
 count = 1
 gpuid = 0
-detector = RetinaFace('../RetinaFace/models/R50', 0, gpuid, 'net3')
-_, _ = detector.detect(np.zeros(IM_SHAPE).astype('uint8'), FACE_DETECTION_THRESH, scales=[1.0], do_flip=False)
+#pdb.set_trace()
+detector = RetinaFace('../RetinaFace/models/R50', 0, gpuid, 'net3', use_TRT=True)
+print("dector loaded")
+#empty_small_img = np.zeros([32,32,3]).astype('uint8')
+#_, _ = detector.detect(empty_small_img, FACE_DETECTION_THRESH, scales=[1.0], do_flip=False)
+
+rgb = cv2.imread('../RetinaFace/33912.png')
+
+# rgb = cv2.merge((rgb, rgb, rgb))
+im_raw = rgb.copy()
+im = rgb - rgb.min()
+im = im.astype('float')
+im = (im / (im.max()) * 255).astype('uint8')
+faces, landmarks = detector.detect(im, FACE_DETECTION_THRESH, scales=[1.0], do_flip=False)
+
+im_plt=im.copy()
+if faces is not None and len(faces) > 0:
+    print('find', faces.shape[0], 'faces')
+    for i in range(faces.shape[0]):
+        # print('score', faces[i][4])
+        box = faces[i].astype(np.int)
+        # color = (255,0,0)
+        color = (0, 0, 255)
+        # temp_raw = im_raw[box[0]:box[2],box[1]:box[3],0].mean()
+        box_draw = 1* box
+        cv2.rectangle(im_plt, (box_draw[0], box_draw[1]), (box_draw[2], box_draw[3]), color, 3)
+
+start_time = time.time()
+for i in range(10):
+	_, _ = detector.detect(im, FACE_DETECTION_THRESH, scales=[1.0], do_flip=False)
+end_time= time.time()
+print("mean single run time: {} Sec".format((end_time-start_time)/10.))
+
+# start_time = time.time()
+# for i in range(5):
+# 	_, _ = detector.detect(np.zeros([384/2,288/2,3]).astype('uint8'), FACE_DETECTION_THRESH, scales=[1.0], do_flip=False)
+# end_time= time.time()
+# print "mean single run time: {} Sec".format((end_time-start_time)/5.)
+
+exit(0)
 
 PY_MAJOR_VERSION = sys.version_info[0]
 
@@ -158,6 +196,9 @@ def detect_rectangle(img):
 
 
 def calc_image_pattern(dirname):
+    if not os.path.isdir(dirname):
+        return 0,np.zeros(IM_SHAPE[:2])
+
     image_path_list = os.listdir(dirname)
 
     image_list = []
@@ -273,11 +314,11 @@ print("nOutputImageQ: {} ".format(nOutputImageQ))
 thermapp = pyipccap.thermapp(None, nOutputImageQ)
 # thermapp = pyipccap.thermapp(name,nOutputImageQ)
 
-print "Open shared memory..."
+print("Open shared memory...")
 
 thermapp.open_shared_memory()
 
-print "Shared memory opened"
+print("Shared memory opened")
 
 rate_list = []
 frame_count = 0
@@ -484,6 +525,8 @@ try:
                     color = (0, 0, 255)
                     # temp_raw = im_raw[box[0]:box[2],box[1]:box[3],0].mean()
                     box_draw = 2 * box
+                    cv2.rectangle(im_plot, (box_draw[0], box_draw[1]), (box_draw[2], box_draw[3]), color, 3)
+
 
                     top_draw = box_draw[1]
                     left_draw = box_draw[0]

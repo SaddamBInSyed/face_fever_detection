@@ -3,6 +3,9 @@ import sys
 import os
 import datetime
 import time
+import tensorrt as trt
+import pycuda.autoinit
+import pycuda.driver as cuda
 import numpy as np
 import mxnet as mx
 from mxnet import ndarray as nd
@@ -15,17 +18,103 @@ from rcnn.processing.generate_anchor import generate_anchors_fpn, anchors_plane
 from rcnn.processing.nms import gpu_nms_wrapper, cpu_nms_wrapper
 from rcnn.processing.bbox_transform import bbox_overlaps
 
+# WITH_RESHAPE_SOFTMAX
+OUTPUT_LAYERS  =['face_rpn_cls_score_stride32', 'face_rpn_bbox_pred_stride32', 'face_rpn_landmark_pred_stride32',
+                 'face_rpn_cls_score_stride16', 'face_rpn_bbox_pred_stride16', 'face_rpn_landmark_pred_stride16',
+                 'face_rpn_cls_score_stride8', 'face_rpn_bbox_pred_stride8', 'face_rpn_landmark_pred_stride8'
+                 ]
+
+
+OUTPUT_SIZE = 9
+
+def convert_output_shape(w,h):
+    OUTPUT_SHAPES =   [(1, 4, h // 32 +1, w // 32+1),
+                      (1, 8, h // 32 +1, w // 32+1),
+                      (1, 20, h // 32 +1, w // 32+1),
+                       (1, 4, h // 16 + 1, w // 16 + 1),
+                       (1, 8, h // 16 + 1, w // 16 + 1),
+                       (1, 20, h // 16 + 1, w // 16 + 1),
+                       (1, 4, h // 8 + 1, w // 8 + 1),
+                       (1, 8, h // 8 + 1, w // 8 + 1),
+                       (1, 20, h // 8 + 1, w // 8 + 1)
+                       ]
+
+    return OUTPUT_SHAPES
+
+
+class HostDeviceMem(object):
+    """Simple helper data class that's a little nicer to use than a 2-tuple."""
+    def __init__(self, host_mem, device_mem):
+        self.host = host_mem
+        self.device = device_mem
+
+    def __str__(self):
+        return "Host:\n" + str(self.host) + "\nDevice:\n" + str(self.device)
+
+    def __repr__(self):
+        return self.__str__()
+
+def do_inference(context, bindings, inputs, outputs, stream, batch_size=1):
+    """do_inference (for TensorRT 6.x or lower)
+    This function is generalized for multiple inputs/outputs.
+    Inputs and outputs are expected to be lists of HostDeviceMem objects.
+    """
+    # Transfer input data to the GPU.
+    [cuda.memcpy_htod_async(inp.device, inp.host, stream) for inp in inputs]
+    # Run inference.
+    context.execute_async(batch_size=batch_size,
+                          bindings=bindings,
+                          stream_handle=stream.handle)
+    # Transfer predictions back from the GPU.
+    [cuda.memcpy_dtoh_async(out.host, out.device, stream) for out in outputs]
+    # Synchronize the stream
+    stream.synchronize()
+    # Return only the host outputs.
+    return [out.host for out in outputs]
+
+def trt_alloc_buf(engine):
+    # host cpu mem
+    inputs = []
+    outputs = [None]*OUTPUT_SIZE
+    bindings = []
+    stream = cuda.Stream()
+    for binding in engine:
+        size = trt.volume(engine.get_binding_shape(binding)) * \
+               engine.max_batch_size
+        dtype = trt.nptype(engine.get_binding_dtype(binding))
+        # Allocate host and device buffers
+        host_mem = cuda.pagelocked_empty(size, dtype)
+        device_mem = cuda.mem_alloc(host_mem.nbytes)
+        # Append the device buffer to device bindings.
+        bindings.append(int(device_mem))
+        # Append to the appropriate list.
+        if engine.binding_is_input(binding):
+            inputs.append(HostDeviceMem(host_mem, device_mem))
+        else:
+            outputs[OUTPUT_LAYERS.index(binding)] = HostDeviceMem(host_mem, device_mem)
+            # outputs.append(HostDeviceMem(host_mem, device_mem))
+    return inputs, outputs, bindings, stream
+
+
 class RetinaFace:
-  def __init__(self, prefix, epoch, ctx_id=0, network='net3', nms=0.4, nocrop=False, decay4 = 0.5, vote=False):
+
+  def __init__(self, prefix, epoch, ctx_id=0, network='net3', nms=0.4,
+               nocrop=False, decay4 = 0.5, vote=False, use_TRT=False, image_size = (384, 288)):
     self.ctx_id = ctx_id
     self.network = network
     self.decay4 = decay4
     self.nms_threshold = nms
     self.vote = vote
     self.nocrop = nocrop
-    self.debug = False
+    self.debug = True
     self.fpn_keys = []
     self.anchor_cfg = None
+    self.image_size_wh = image_size
+    self.use_TRT = use_TRT
+    self.TRT_engine_path = '../RetinaFace/models/R50_SOFTMAX.engine'
+    self.TRT_init_ok = False
+    self.TRT_LOGGER = trt.Logger(trt.Logger.VERBOSE) if self.debug else trt.Logger()
+
     pixel_means=[0.0, 0.0, 0.0]
     pixel_stds=[1.0, 1.0, 1.0]
     pixel_scale = 1.0
@@ -124,11 +213,15 @@ class RetinaFace:
     #self._bbox_pred = nonlinear_pred
     #self._landmark_pred = landmark_pred
     sym, arg_params, aux_params = mx.model.load_checkpoint(prefix, epoch)
+
+    # from mxnet.contrib import onnx as onnx_mxnet
+    # onnx_mxnet.export_model('../RetinaFace/models/R50-symbol.json',
+    #                         '../RetinaFace/models/R50-0000.params', [(1, 3, 640, 640)], np.float32,
+    #                         '../RetinaFace/models/mxnet_exported_R50.onnx')
+
     if self.ctx_id>=0:
-      self.ctx = mx.gpu(self.ctx_id)
       self.nms = gpu_nms_wrapper(self.nms_threshold, self.ctx_id)
     else:
-      self.ctx = mx.cpu()
       self.nms = cpu_nms_wrapper(self.nms_threshold)
     self.pixel_means = np.array(pixel_means, dtype=np.float32)
     self.pixel_stds = np.array(pixel_stds, dtype=np.float32)
@@ -153,22 +246,105 @@ class RetinaFace:
       self._feat_stride_fpn = [32,16,8]
     print('sym size:', len(sym))
 
-    image_size = (640, 640)
-    self.model = mx.mod.Module(symbol=sym, context=self.ctx, label_names = None)
-    self.model.bind(data_shapes=[('data', (1, 3, image_size[0], image_size[1]))], for_training=False)
-    self.model.set_params(arg_params, aux_params)
+
+    if self.use_TRT:
+        self.init_trt()
+        self.output_shapes = convert_output_shape(w=self.image_size_wh[0], h=self.image_size_wh[1])
+    else:
+        if self.ctx_id >= 0:
+            self.ctx = mx.gpu(self.ctx_id)
+        else:
+            self.ctx = mx.cpu()
+        sym, arg_params, aux_params = mx.model.load_checkpoint(prefix, epoch)
+        self.model = mx.mod.Module(symbol=sym, context=self.ctx, label_names = None)
+        self.model.bind(data_shapes=[('data', (1, 3, self.image_size_wh[0], self.image_size_wh[1]))], for_training=False)
+        self.model.set_params(arg_params, aux_params)
 
   def get_input(self, img):
     im = img.astype(np.float32)
     im_tensor = np.zeros((1, 3, im.shape[0], im.shape[1]))
     for i in range(3):
         im_tensor[0, i, :, :] = (im[:, :, 2 - i]/self.pixel_scale - self.pixel_means[2 - i])/self.pixel_stds[2-i]
-    #if self.debug:
-    #  timeb = datetime.datetime.now()
-    #  diff = timeb - timea
-    #  print('X2 uses', diff.total_seconds(), 'seconds')
+
     data = nd.array(im_tensor)
     return data
+
+  def convert_trt_output_shape(self,trt_outputs ):
+
+      trt_outputs = [output.reshape(shape) for output, shape
+                     in zip(trt_outputs, self.output_shapes)]
+
+      return trt_outputs
+
+  def _load_engine(self):
+
+        if not os.path.exists(self.TRT_engine_path):
+            return None
+
+        with open(self.TRT_engine_path, 'rb') as f, trt.Runtime(self.TRT_LOGGER) as runtime:
+            return runtime.deserialize_cuda_engine(f.read())
+
+
+  def _create_context(self):
+        return self.engine.create_execution_context()
+
+  def init_trt(self):
+
+        self.engine = self._load_engine()
+
+        if not self.engine:
+            self.TRT_init_ok = False
+            return False
+
+        self.context = self._create_context()
+
+        if not self.context:
+            self.TRT_init_ok = False
+            return False
+
+        self.inputs, self.outputs, self.bindings, self.stream = \
+            trt_alloc_buf(self.engine)
+
+        self.TRT_init_ok=True
+
+        return True
+
+
+
+  def forward_trt(self,im_tensor ):
+
+      if not self.TRT_init_ok:
+          return None
+
+      self.inputs[0].host = np.ascontiguousarray(im_tensor)
+      trt_outputs = do_inference(
+          context=self.context,
+          bindings=self.bindings,
+          inputs=self.inputs,
+          outputs=self.outputs,
+          stream=self.stream)
+
+      trt_outputs = self.convert_trt_output_shape(trt_outputs)
+
+      return trt_outputs
+
+
+  def forward(self,im_tensor ,is_train=False):
+
+      if self.use_TRT:
+        net_out = self.forward_trt(im_tensor=im_tensor)
+
+
+      else:
+
+        data = nd.array(im_tensor)
+        db = mx.io.DataBatch(data=(data,), provide_data=[('data', data.shape)])
+        self.model.forward(db, is_train=False)
+        net_out = self.model.get_outputs()
+
+      return net_out
+
+  # def pre_process(self,img, scales=[1.0], do_flip=False):
 
   def detect(self, img, threshold=0.5, scales=[1.0], do_flip=False):
     #print('in_detect', threshold, scales, do_flip, do_nms)
@@ -207,28 +383,22 @@ class RetinaFace:
             im = _im
           else:
             im = im.astype(np.float32)
-          if self.debug:
-            timeb = datetime.datetime.now()
-            diff = timeb - timea
-            print('X1 uses', diff.total_seconds(), 'seconds')
           #self.model.bind(data_shapes=[('data', (1, 3, image_size[0], image_size[1]))], for_training=False)
           #im_info = [im.shape[0], im.shape[1], im_scale]
           im_info = [im.shape[0], im.shape[1]]
-          im_tensor = np.zeros((1, 3, im.shape[0], im.shape[1]))
+          im_tensor = np.zeros((1, 3, im.shape[0], im.shape[1])).astype(np.float32)
           for i in range(3):
               im_tensor[0, i, :, :] = (im[:, :, 2 - i]/self.pixel_scale - self.pixel_means[2 - i])/self.pixel_stds[2-i]
+
           if self.debug:
-            timeb = datetime.datetime.now()
-            diff = timeb - timea
-            print('X2 uses', diff.total_seconds(), 'seconds')
-          data = nd.array(im_tensor)
-          db = mx.io.DataBatch(data=(data,), provide_data=[('data', data.shape)])
-          if self.debug:
-            timeb = datetime.datetime.now()
-            diff = timeb - timea
-            print('X3 uses', diff.total_seconds(), 'seconds')
-          self.model.forward(db, is_train=False)
-          net_out = self.model.get_outputs()
+              timea = datetime.datetime.now()
+              net_out = self.forward(im_tensor, is_train=False)
+              timeb = datetime.datetime.now()
+              diff = timeb - timea
+              print('RetinaFace forward', diff.total_seconds(), 'seconds')
+          else:
+              net_out = self.forward(im_tensor, is_train=False)
+
           #post_nms_topN = self._rpn_post_nms_top_n
           #min_size_dict = self._rpn_min_size_fpn
 
@@ -245,7 +415,7 @@ class RetinaFace:
               #if self.vote and stride==4 and len(scales)>2 and (im_scale==scales[0]):
               #  continue
               #print('getting', im_scale, stride, idx, len(net_out), data.shape, file=sys.stderr)
-              scores = net_out[sym_idx].asnumpy()
+              scores = net_out[sym_idx]
               if self.debug:
                 timeb = datetime.datetime.now()
                 diff = timeb - timea
@@ -254,7 +424,7 @@ class RetinaFace:
               #print('scores',stride, scores.shape, file=sys.stderr)
               scores = scores[:, self._num_anchors['stride%s'%s]:, :, :]
 
-              bbox_deltas = net_out[sym_idx+1].asnumpy()
+              bbox_deltas = net_out[sym_idx+1]
 
               #if DEBUG:
               #    print 'im_size: ({}, {})'.format(im_info[0], im_info[1])
@@ -305,7 +475,7 @@ class RetinaFace:
                 for diff_idx in __idx:
                   if sym_idx+diff_idx>=len(net_out):
                     break
-                  body = net_out[sym_idx+diff_idx].asnumpy()
+                  body = net_out[sym_idx+diff_idx]
                   if body.shape[1]//A==2: #cls branch
                     if cls_cascade or bbox_cascade:
                       break
@@ -373,7 +543,7 @@ class RetinaFace:
                 strides_list.append(_strides)
 
               if not self.vote and self.use_landmarks:
-                landmark_deltas = net_out[sym_idx+2].asnumpy()
+                landmark_deltas = net_out[sym_idx+2]
                 #landmark_deltas = self._clip_pad(landmark_deltas, (height, width))
                 landmark_pred_len = landmark_deltas.shape[1]//A
                 landmark_deltas = landmark_deltas.transpose((0, 2, 3, 1)).reshape((-1, 5, landmark_pred_len//5))
@@ -438,7 +608,14 @@ class RetinaFace:
     if self.nms_threshold>0.0:
       pre_det = np.hstack((proposals[:,0:4], scores)).astype(np.float32, copy=False)
       if not self.vote:
-        keep = self.nms(pre_det)
+        if self.debug:
+            timea = datetime.datetime.now()
+            keep = self.nms(pre_det)
+            timeb = datetime.datetime.now()
+            diff = timeb - timea
+            print('NMS GPU ', diff.total_seconds(), 'seconds')
+        else:
+            keep = self.nms(pre_det)
         det = np.hstack( (pre_det, proposals[:,4:]) )
         det = det[keep, :]
         if self.use_landmarks:

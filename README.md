@@ -65,6 +65,6 @@ sudo bin/erop-proxy-cam -nproxycam-ir --perror --logmask=130
 ```
 12. Run from ```examples/python```:
 ```
- sudo ../../venv_27/bin/python  capture_opencv.py /ipc0
+ sudo LD_LIBRARY_PATH=$LD_LIBRARY_PATH ../../venv_27/bin/python  capture_opencv.py /ipc0
 ```
 
