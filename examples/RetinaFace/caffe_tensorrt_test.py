@@ -26,11 +26,11 @@ OUTPUT_LAYERS  =['face_rpn_cls_score_stride32', 'face_rpn_bbox_pred_stride32', '
 
 
 
-INPUT_H = 288
-INPUT_W =  384
+INPUT_H = 384 #288
+INPUT_W =  288 #384
 OUTPUT_SIZE = 9
 
-MODEL_PROTOTXT = 'models/R50_SOFTMAX.prototxt'
+MODEL_PROTOTXT = 'models/R50_SOFTMAX_VERT.prototxt'
 CAFFE_MODEL = 'models/R50-0000.caffemodel'
 
 # engine = trt.utils.caffe_to_trt_engine(G_LOGGER,
@@ -213,18 +213,18 @@ def _preprocess_img(img, shape):
 
 if __name__ == "__main__":
     # inputs = np.random.random((1, 3, INPUT_W, INPUT_H)).astype(np.float32)
-    # engine = build_engine(MODEL_PROTOTXT, CAFFE_MODEL, verbose=False)
+    engine = build_engine(MODEL_PROTOTXT, CAFFE_MODEL, verbose=False)
     # import pdb
     # pdb.set_trace()
     # with
-    # with open('models/R50_SOFTMAX.engine', 'wb') as f:
-    #     f.write(engine.serialize())
+    with open('models/R50_SOFTMAX_VERT.engine', 'wb') as f:
+        f.write(engine.serialize())
     #img = cv2.imread('33347.png')
     # img_resized =  _preprocess_img(img, (384, 288))
     img_resized = np.load('data.npy')
     # img_resized = np.zeros_like(img_resized).astype(np.float32)
-    with open('models/R50_SOFTMAX.engine', 'rb') as f, trt.Runtime(TRT_LOGGER) as runtime:
-       engine = runtime.deserialize_cuda_engine(f.read())
+    # with open('models/R50_SOFTMAX.engine', 'rb') as f, trt.Runtime(TRT_LOGGER) as runtime:
+    #    engine = runtime.deserialize_cuda_engine(f.read())
     # #
     context = engine.create_execution_context()
     inputs, outputs, bindings, stream = alloc_buf(engine)

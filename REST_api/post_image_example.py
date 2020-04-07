@@ -4,7 +4,7 @@ import random
 import base64
 import json
 
-SERVER_REST_API_URL = "http://localhost:5000/predict"
+SERVER_REST_API_URL = "http://10.53.128.56:5000/predict"
 IMAGE_PATH = "temp_image_wh_384_288_1.raw"
 
 # load the input image and construct the payload for the request

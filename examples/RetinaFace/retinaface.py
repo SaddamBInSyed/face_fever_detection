@@ -7,8 +7,6 @@ import tensorrt as trt
 import pycuda.autoinit
 import pycuda.driver as cuda
 import numpy as np
-import mxnet as mx
-from mxnet import ndarray as nd
 import cv2
 #from rcnn import config
 from rcnn.logger import logger
@@ -98,7 +96,8 @@ def trt_alloc_buf(engine):
 
 class RetinaFace:
 
-  def __init__(self, prefix, epoch, ctx_id=0, network='net3', nms=0.4,
+  def __init__(self, prefix, TRT_engine_path= '../RetinaFace/models/R50_SOFTMAX.engine',
+               epoch=0, ctx_id=0, network='net3', nms=0.4,
                nocrop=False, decay4 = 0.5, vote=False, use_TRT=False, image_size = (384, 288)):
     self.ctx_id = ctx_id
     self.network = network
@@ -111,7 +110,7 @@ class RetinaFace:
     self.anchor_cfg = None
     self.image_size_wh = image_size
     self.use_TRT = use_TRT
-    self.TRT_engine_path = '../RetinaFace/models/R50_SOFTMAX.engine'
+    self.TRT_engine_path =TRT_engine_path
     self.TRT_init_ok = False
     self.TRT_LOGGER = trt.Logger(trt.Logger.VERBOSE) if self.debug else trt.Logger()
 
@@ -210,14 +209,7 @@ class RetinaFace:
       self._anchors_fpn[k] = v
 
     self._num_anchors = dict(zip(self.fpn_keys, [anchors.shape[0] for anchors in self._anchors_fpn.values()]))
-    #self._bbox_pred = nonlinear_pred
-    #self._landmark_pred = landmark_pred
-    sym, arg_params, aux_params = mx.model.load_checkpoint(prefix, epoch)
 
-    # from mxnet.contrib import onnx as onnx_mxnet
-    # onnx_mxnet.export_model('../RetinaFace/models/R50-symbol.json',
-    #                         '../RetinaFace/models/R50-0000.params', [(1, 3, 640, 640)], np.float32,
-    #                         '../RetinaFace/models/mxnet_exported_R50.onnx')
 
     if self.ctx_id>=0:
       self.nms = gpu_nms_wrapper(self.nms_threshold, self.ctx_id)
@@ -227,38 +219,21 @@ class RetinaFace:
     self.pixel_stds = np.array(pixel_stds, dtype=np.float32)
     self.pixel_scale = float(pixel_scale)
     print('means', self.pixel_means)
-    self.use_landmarks = False
-    if len(sym)//len(self._feat_stride_fpn)>=3:
-      self.use_landmarks = True
+    self.use_landmarks = True
+
     print('use_landmarks', self.use_landmarks)
     self.cascade = 0
-    if float(len(sym))//len(self._feat_stride_fpn)>3.0:
-      self.cascade = 1
+
     print('cascade', self.cascade)
     #self.bbox_stds = [0.1, 0.1, 0.2, 0.2]
     #self.landmark_std = 0.1
     self.bbox_stds = [1.0, 1.0, 1.0, 1.0]
     self.landmark_std = 1.0
 
-    if self.debug:
-      c = len(sym)//len(self._feat_stride_fpn)
-      sym = sym[(c*0):]
-      self._feat_stride_fpn = [32,16,8]
-    print('sym size:', len(sym))
+    self.init_trt()
+    self.output_shapes = convert_output_shape(w=self.image_size_wh[0], h=self.image_size_wh[1])
 
 
-    if self.use_TRT:
-        self.init_trt()
-        self.output_shapes = convert_output_shape(w=self.image_size_wh[0], h=self.image_size_wh[1])
-    else:
-        if self.ctx_id >= 0:
-            self.ctx = mx.gpu(self.ctx_id)
-        else:
-            self.ctx = mx.cpu()
-        sym, arg_params, aux_params = mx.model.load_checkpoint(prefix, epoch)
-        self.model = mx.mod.Module(symbol=sym, context=self.ctx, label_names = None)
-        self.model.bind(data_shapes=[('data', (1, 3, self.image_size_wh[0], self.image_size_wh[1]))], for_training=False)
-        self.model.set_params(arg_params, aux_params)
 
   def get_input(self, img):
     im = img.astype(np.float32)
@@ -331,18 +306,9 @@ class RetinaFace:
 
   def forward(self,im_tensor ,is_train=False):
 
-      if self.use_TRT:
-        net_out = self.forward_trt(im_tensor=im_tensor)
+    net_out = self.forward_trt(im_tensor=im_tensor)
 
-
-      else:
-
-        data = nd.array(im_tensor)
-        db = mx.io.DataBatch(data=(data,), provide_data=[('data', data.shape)])
-        self.model.forward(db, is_train=False)
-        net_out = self.model.get_outputs()
-
-      return net_out
+    return net_out
 
   # def pre_process(self,img, scales=[1.0], do_flip=False):
 

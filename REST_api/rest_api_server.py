@@ -1,15 +1,114 @@
+
+
+import gevent
+from gevent.monkey import patch_all;
+patch_all()
 import flask
-import random
+from gevent.pywsgi import WSGIServer
 import base64
 import numpy as np
 import time
 import collections
+import sys
+sys.path.insert(0, 'RetinaFace')
+from RetinaFace import retinaface
+import cv2
+import logging
+sys.path.insert(0, '..')
+import examples.python.transformations as transformations
 
-app = flask.Flask(__name__)
-app.config["DEBUG"] = True
+
 
 homepage = "<h1>REST-API Example</h1><p>This site is a prototype REST-API</p>"
 timings = collections.deque([],maxlen=5)
+
+FACE_DETECTION_THRESH=0.2
+FACE_TEMP_PRECENTILE = [0.8, 1.0]
+
+l_ratio = 0.25
+r_ratio = 0.75
+t_ratio = 0.1
+b_ratio = 0.3
+
+IMAGE_SIZE_WH = (288,384)
+# def init_detector():
+trt_engine_path = '/home/ffd/face_fever_detection/examples/RetinaFace/models/R50_SOFTMAX_VERT.engine'
+retina_prefix = ''
+# app.logger.info("Loadind detector ...")
+detector = retinaface.RetinaFace(prefix=retina_prefix, TRT_engine_path=trt_engine_path, ctx_id=0, network='net3', use_TRT=True, image_size=IMAGE_SIZE_WH)
+# app.logger.info("Finish loadind detector with status {}".format("OK" if detector.TRT_init_ok else "Failure"))
+# app.logger.info("Warmup detector...")
+empty_img = np.zeros([288,384,3]).astype('uint8')
+_,_ = detector.detect(empty_img, FACE_DETECTION_THRESH, scales=[1.0], do_flip=False)
+# app.logger.info("Detector ready!")
+
+def calc_precentile(x, q_min=0.8, q_max=0.95):
+
+    x_sorterd = np.sort(x.flatten())
+
+    N = len(x_sorterd) - 1
+
+    ind_min = int(np.floor(q_min * N))
+    ind_max = int(np.floor(q_max * N))
+
+    if ind_min < ind_max:
+        y = np.mean(x_sorterd[ind_min:ind_max])
+    else:
+        y = x_sorterd[ind_max]
+
+    return y
+
+
+def calac_temp_median_of_rect(img, box):
+
+    # for temparture calculation - use raw image
+    top = int(box[1])
+    left = int(box[0])
+    bottom = int(box[3])
+    right = int(box[2])
+
+    w = box[2] - box[0]
+    h = box[3] - box[1]
+    hor_start = int(left + l_ratio * w)
+    hor_end = int(left + r_ratio * w)
+    ver_start = int(top + t_ratio * h)
+    ver_end = int(top + b_ratio * h)
+
+    temp_raw = np.median(img[ver_start:ver_end, hor_start:hor_end])
+    forehead_bb = [hor_start, ver_start, hor_end, ver_end]
+    return temp_raw, forehead_bb
+
+def calac_temp_precentile(img, box):
+
+    top = box[1]
+    left = box[0]
+    bottom = box[3]
+    right = box[2]
+
+    hor_start = int(left)
+    hor_end = int(right)
+    ver_start = int(top)
+    ver_end = int(bottom)
+
+    temp_raw = calc_precentile(img[ver_start:ver_end, hor_start:hor_end], q_min=FACE_TEMP_PRECENTILE[0],
+                               q_max=FACE_TEMP_PRECENTILE[1])
+    return temp_raw
+
+
+def rotl_coords(point_xy, im_wh):
+    # 1. to central coords:
+    im_w, im_h = im_wh
+    px = point_xy[0] - im_w / 2
+    py = point_xy[1] - im_h / 2
+    # 2. rotl around (0,0)
+    px_r = -py
+    py_r = px
+    # 2. shift back to - topleft and return:
+    return (px_r + im_w / 2, py_r + im_h / 2)
+
+
+app = flask.Flask(__name__)
+app.config["DEBUG"] = True
 
 @app.route('/', methods=['GET'])
 def home():
@@ -19,9 +118,15 @@ def home():
 @app.route("/predict", methods=["POST"])
 def predict():
     response = {'status': 'failure', 'msg': 'unknown'}
+    # global detector
     global timings
+    if not detector.TRT_init_ok:
+        msg = "predict requested before init done"
+        app.logger.error(msg)
+        response = {'status': 'failure', 'msg': msg}
+        return flask.jsonify(response)
     timings.append(time.time())
-    n_calls = len(timings)
+    n_calls = len(timings)-1
     t_total = timings[-1] - timings[0]
     t_rate = n_calls / t_total if t_total != 0 else 0
     app.logger.info("@/predict: last {} calls took {:.2f} seconds. Rate is {:.2f} Hz. (calls/second)".format(n_calls,
@@ -60,36 +165,111 @@ def predict():
             temperatures_byte_array = base64.b64decode(temperatures)
             temperatures_array = np.frombuffer(temperatures_byte_array, dtype='int32')
             temperatures_image = np.reshape(temperatures_array, (height, width))
+            temperatures_image_for_human =  temperatures_image.astype(np.float32)/100.
         except Exception as e:
             msg = "Failed to convert a field: {}".format(e)
             app.logger.error(msg)
             response = {'status': 'failure', 'msg': msg}
             return flask.jsonify(response)
 
-        #TODO: Do some actual work with the data here
-        num_predictions = random.randint(0, 10)
+        if temperatures_image.shape != detector.image_size_wh:
+            msg = "Image and network shape mismatch"
+            app.logger.error(msg)
+            response = {'status': 'failure', 'msg': msg}
+            return flask.jsonify(response)
+
+
+
+
+        im_plot = cv2.merge((temperatures_image, temperatures_image, temperatures_image))
+        # im_raw = rgb.copy()
+        im_plot = im_plot - im_plot.min()
+        im_plot = im_plot.astype(np.float32)
+        im_plot = (im_plot / (im_plot.max()) * 255).astype(np.uint8)
+
+
+        #temperatures_image = np.rot90(temperatures_image, -1)
+        #rgb = cv2.flip(temperatures_image, 1)
+        M = transformations.calculate_affine_matrix(rotation_angle=-90, rotation_center=(0, 0), translation=(0, 0), scale=1)
+        # M1 = transformations.calculate_affine_matrix(rotation_angle=-90, rotation_center=(0, 0), translation=(0, 0), scale=1)
+        # M2 = transformations.calculate_affine_matrix(rotation_angle=0, rotation_center=(0, 0), translation=(0, 0), scale=-1)
+        # M = transformations.concatenate_affine_matrices(M2, M1)
+        rgb , Mc = transformations.warp_affine_without_crop(temperatures_image.astype(np.float32), M)
+        temperatures_image_for_human, _ = transformations.warp_affine_without_crop(temperatures_image_for_human.astype(np.float32), M)
+        print(M)
+
+        Mc_inv = transformations.cal_affine_matrix_inverse(Mc)
+        rgb = cv2.merge((rgb, rgb, rgb))
+        # im_raw = rgb.copy()
+        rgb = rgb - rgb.min()
+        rgb = rgb.astype(np.float32)
+        rgb = (rgb / (rgb.max()) * 255).astype(np.uint8)
+        #cv2.imwrite('after_trn_temp.png',rgb)
+        app.logger.info('Detection start ...')
+        faces, landmarks = detector.detect(rgb, FACE_DETECTION_THRESH, scales=[1.0], do_flip=False)
+        app.logger.info('Detection finish ...')
+
+        num_predictions = len(faces) if faces is not None else 0
+        print(faces)
         response["id"] = id
         response["faces"] = []
-        response["num_predictions"] = num_predictions
         for i in range(num_predictions):
             pred = {}
-            pred['top'] = random.randrange(0, height - 1)
-            pred['left'] = random.randrange(0, width - 1)
-            pred['bottom'] = random.randrange(pred['top'], height)
-            pred['right'] = random.randrange(pred['left'], width)
-            pred_height = pred['bottom'] - pred['top']
-            pred_width = pred['right'] - pred['left']
-            pred_ceter_row = pred['top'] + int(pred_height / 2)
-            pred_ceter_col = pred['left'] + int(pred_width / 2)
-            pred['temp'] = float(temperatures_image[pred_ceter_row, pred_ceter_col])/100.0
+            box = faces[i]
+
+            left = box[0]
+            top = box[1]
+            right = box[2]
+            bottom = box[3]
+
+            box = np.array([[left, top], [right, bottom]])
+            box = transformations.warp_points(box, Mc_inv).flatten()
+
+            scale_fatcor_x= 2.46 # 16.3/6
+            scale_fatcor_y = 25.5 / 28.2
+            trans_y = - 0
+
+            pred['left'] = scale_fatcor_x * int(box[1])
+            pred['top'] = scale_fatcor_y * int(box[0]) + trans_y
+            pred['right'] = scale_fatcor_x * int(box[3])
+            pred['bottom'] = scale_fatcor_y * int(box[2]) + trans_y
+
+            temp, forehead = calac_temp_median_of_rect(temperatures_image_for_human, faces[i])
+            pred['temp'] = float("%.01f" % temp)
+            pred['treshold'] = float(36.5)
+
             response["faces"].append(pred)
+            # adding forehead:
+            pred1 = {}
+            box = forehead
+
+            left = box[0]
+            top = box[1]
+            right = box[2]
+            bottom = box[3]
+
+            box = np.array([[left, top], [right, bottom]])
+            box = transformations.warp_points(box, Mc_inv).flatten()
+
+            pred1['left'] = scale_fatcor_x * int(box[1])
+            pred1['top'] = scale_fatcor_y * int(box[0]) + trans_y
+            pred1['right'] = scale_fatcor_x * int(box[3])
+            pred1['bottom'] = scale_fatcor_y * int(box[2]) + trans_y
+            pred1['temp'] = 0
+            pred1['treshold'] = float(36.5)
+            response["faces"].append(pred1)
 
         # indicate that the request was a success
+        response["num_predictions"] = len(response["faces"])
         response['status'] = 'success'
         response['msg'] = ""
     # return the data dictionary as a JSON response
     return flask.jsonify(response)
 
 
-
-app.run(host='0.0.0.0', port=5000)
+if __name__=="__main__":
+    # init_detector()
+    host = '0.0.0.0'
+    port = 5000
+    # app.run(host='0.0.0.0', port=5000,use_reloader=False)
+    WSGIServer((host, port), app).serve_forever()
