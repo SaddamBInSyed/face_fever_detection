@@ -109,6 +109,14 @@ class cyclicBuffer(object):
 
         return N
 
+    def num_elements_written(self):
+
+        N = self.indRead - self.indWrite
+
+        if N < 0:
+            N += self.length
+
+        return N
 
 
 class TemperatureHistogram(object):
@@ -119,12 +127,16 @@ class TemperatureHistogram(object):
                  N_samples_for_temp_th=50,
                  temp_th_nominal=34.0,
                  buffer_max_len=3000,
+                 temp_th_min=30.0,
+                 temp_th_max=36.0,
                  ):
 
         self.hist_calc_interval = hist_calc_interval  # [sec]
         self.hist_percentile = hist_percentile   # [%]
         self.N_samples_for_temp_th = N_samples_for_temp_th
         self.temp_th_nominal = temp_th_nominal
+        self.temp_th_min = temp_th_min
+        self.temp_th_max = temp_th_max
 
         # cyclic buffer
         self.buffer_max_len = buffer_max_len
@@ -148,6 +160,27 @@ class TemperatureHistogram(object):
         self.temp_buffer.write(temp)
         self.time_buffer.write(time_stamp)
 
+    def num_elements_written(self):
+
+        return self.time_buffer.num_elements_written()
+
+
+    def num_elements_in_time_interval(self, time_interval):
+
+        time_vec_all = time_buffer.read(time_buffer.length)
+
+        # find indices of wanted time interval
+        time_th = time_current - time_interval
+        ind = np.where(time_vec_all > time_th)[0]
+
+        # get temperature values of wanted time interval
+        temp_vec = temp_vec_all[ind]
+
+        N = len(temp_vec)
+
+        return N
+
+
 
     def calculate_temperature_threshold(self, display=False):
 
@@ -159,6 +192,8 @@ class TemperatureHistogram(object):
         alpha = np.clip(alpha, 0., 1.)
 
         temp_th = alpha * temp_percentage + (1 - alpha) * temp_th_nominal
+
+        temp_th = np.clip(temp_th, a_min=self.temp_th_min, a_max=self.temp_th_max)
 
         temp_th = np.round(temp_th, 1)
 
@@ -292,6 +327,8 @@ if __name__ == '__main__':
     N_samples_for_temp_th = 50
     temp_th_nominal = 34.0
     buffer_max_len = 3000  #
+    temp_th_min = 30.0
+    temp_th_max = 37.0
 
     temp_hist = TemperatureHistogram(hist_calc_interval=hist_calc_interval,
                                      hist_percentile = hist_percentile,
