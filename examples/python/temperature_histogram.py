@@ -125,6 +125,7 @@ class TemperatureHistogram(object):
                  hist_calc_interval=30*60,  # [sec]
                  hist_percentile=0.85,  # [%]
                  N_samples_for_temp_th=50,
+                 N_samples_for_first_temp_th=20,
                  temp_th_nominal=34.0,
                  buffer_max_len=3000,
                  temp_th_min=30.0,
@@ -137,6 +138,8 @@ class TemperatureHistogram(object):
         self.temp_th_nominal = temp_th_nominal
         self.temp_th_min = temp_th_min
         self.temp_th_max = temp_th_max
+
+        self.is_initialized = False  # True after first temp_th calculation
 
         # cyclic buffer
         self.buffer_max_len = buffer_max_len
@@ -167,24 +170,27 @@ class TemperatureHistogram(object):
 
     def num_elements_in_time_interval(self, time_interval):
 
-        time_vec_all = time_buffer.read(time_buffer.length)
+        # read all time
+        time_vec_all = self.time_buffer.read(self.time_buffer.length)
 
         # find indices of wanted time interval
         time_th = time_current - time_interval
         ind = np.where(time_vec_all > time_th)[0]
 
         # get temperature values of wanted time interval
-        temp_vec = temp_vec_all[ind]
+        time_vec = time_vec_all[ind]
 
-        N = len(temp_vec)
+        N = len(time_vec)
 
         return N
 
 
 
-    def calculate_temperature_threshold(self, display=False):
+    def calculate_temperature_threshold(self, time_current, hist_calc_interval=None, display=False):
 
-        time_current = time.time()
+        if hist_calc_interval is None:
+            hist_calc_interval = self.hist_calc_interval
+
         bins, hist, temp_percentage, N_samples = \
             TemperatureHistogram.calculate_temp_hist(self.time_buffer, self.temp_buffer, hist_calc_interval, time_current, hist_percentile=hist_percentile, display=display)
 
@@ -199,6 +205,9 @@ class TemperatureHistogram(object):
 
         self.temp_th = temp_th
 
+        if not self.is_initialized:
+            self.is_initialized = True
+
         return temp_th
 
 
@@ -212,7 +221,7 @@ class TemperatureHistogram(object):
 
         # find indices of wanted time interval
         time_th = time_current - hist_calc_interval
-        ind = np.where(time_vec_all > time_th)[0]
+        ind = np.where((time_vec_all > time_th) & (temp_vec_all > 0))[0]
 
         # get temperature values of wanted time interval
         temp_vec = temp_vec_all[ind]
@@ -310,7 +319,7 @@ if __name__ == '__main__':
     lambda_poisson = lambda_poisson_hour / (60)  # probability per second
 
     # temperature
-    tmp_mean = 36.5  # [celsius]
+    tmp_mean = 33.5  # [celsius]
     temp_std = 1.  # [celsius]
 
     # # simulation length
@@ -325,18 +334,28 @@ if __name__ == '__main__':
     hist_calc_interval = 30 * 60  # [sec]
     hist_percentile = 0.85
     N_samples_for_temp_th = 50
+    N_samples_for_first_temp_th = 20
     temp_th_nominal = 34.0
     buffer_max_len = 3000  #
     temp_th_min = 30.0
-    temp_th_max = 37.0
+    temp_th_max = 36.0
 
     temp_hist = TemperatureHistogram(hist_calc_interval=hist_calc_interval,
                                      hist_percentile = hist_percentile,
                                      N_samples_for_temp_th=N_samples_for_temp_th,
                                      temp_th_nominal=temp_th_nominal,
-                                     buffer_max_len=buffer_max_len)
+                                     buffer_max_len=buffer_max_len,
+                                     temp_th_min=temp_th_min,
+                                     temp_th_max=temp_th_max,
+                                     )
+
+    # time_start = time.time()
+    time_start = 0
 
     for n in range(N_sec):
+
+        # time_current = time.time()
+        time_current = n
 
         # sample people enterance
         prob_people = np.random.poisson(lam=lambda_poisson, size=(1,))[0]
@@ -347,18 +366,18 @@ if __name__ == '__main__':
             temp = np.array([np.random.normal(tmp_mean, temp_std)])
 
             # get current time
-            time_stamp = np.array([time.time()])
+            time_stamp = np.array([time_current])
 
             # write temp and time_stamp to buffer
             temp_hist.write_sample(temp=temp, time_stamp=time_stamp)
 
+        # initalize temp_th
+        if not temp_hist.is_initialized and (temp_hist.num_elements_in_time_interval(time_current - time_start) > N_samples_for_first_temp_th):
+            temp_th = temp_hist.calculate_temperature_threshold(time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval, display=display)
 
         # calculate temprature histogram
         if (np.mod(n, temp_hist.hist_calc_interval) == 0) and (n > 0):
-
-            time_current = time.time()
-
-            temp_th = temp_hist.calculate_temperature_threshold(display=display)
+            temp_th = temp_hist.calculate_temperature_threshold(time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval, display=display)
 
 
     print ('Done')
