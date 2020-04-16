@@ -1,3 +1,4 @@
+from __future__ import print_function
 import numpy as np
 
 class facesIdTracker():
@@ -161,10 +162,10 @@ if __name__ == "__main__":
     ids2, meanTemp2 = facesTracker.giveFacesIds(frame2Faces, temp2)
     ids3, meanTemp3 = facesTracker.giveFacesIds(frame3Faces, temp3)
 
-    print ids1
-    print ids2
-    print ids3
-    print meanTemp1
-    print meanTemp2
-    print meanTemp3
+    print(ids1)
+    print(ids0)
+    print(ids3)
+    print(meanTemp1)
+    print(meanTemp2)
+    print(meanTemp3)
 

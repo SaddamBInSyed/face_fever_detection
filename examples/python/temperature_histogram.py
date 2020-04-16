@@ -1,11 +1,16 @@
 # coding=utf-8
+from __future__ import print_function, division, unicode_literals
 import numpy as np
 from scipy import interpolate
+import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 import os
-from facesIDtracker import facesIdTracker
 import time
+
+import sys
+sys.path.append(os.path.dirname(__file__))
+from facesIDtracker import facesIdTracker
 
 displayImage = True
 
@@ -36,6 +41,7 @@ class cyclicBuffer(object):
         # save buffer length
         self.length =np.array(shape[0]) # buffer length
 
+
     def write(self, x):
         """
         Write x to buffer
@@ -62,14 +68,15 @@ class cyclicBuffer(object):
         # update write index
         self.indWrite = (self.indWrite + N) % self.length
 
-    def read(self, N):
+
+    def read(self, N, advance_read_index=False):
         """
         Read N elements from buffer.
 
         Parameters
         ----------
         N : ndarray
-            Number of elements to be readfrom buffer.
+            Number of elements to be read from buffer.
 
         Returns
         ----------
@@ -84,15 +91,16 @@ class cyclicBuffer(object):
         # read data from buffer
         y = self.buf[inds]
 
-        # update read index
-        self.indRead = (self.indRead + N) % self.length
+        if advance_read_index:
+            # update read index
+            self.indRead = (self.indRead + N) % self.length
 
         return y
 
     def getNumOfElementsToRead(self):
 
         """
-        Calculate how much un-readelements can be read.
+        Calculate how much un-read elements can be read.
 
         Parameters
         ----------
@@ -101,7 +109,7 @@ class cyclicBuffer(object):
         Returns
         ----------
         N : ndarray
-            Number of un-read elements inbuffer.
+            Number of un-read elements in buffer.
         """
 
         N = self.indWrite - self.indRead
@@ -120,55 +128,59 @@ class cyclicBuffer(object):
 
         return N
 
+
 class TemperatureHistogram(object):
 
+
     def __init__(self,
-                 time_buffer_max_len=30*60,  # [sec]
+                 hist_calc_interval=30 * 60, # [sec]
+                 buffer_max_len=120*60*1,  # [minutes * sec * persons_per_sec]
                  hist_percentile=0.85,  # [%]
-                 num_people_for_temp_th=50,
-                 num_people_for_first_temp_th=20,
+                 N_samples_for_temp_th=50,
+                 N_samples_for_first_temp_th=20,
                  temp_th_nominal=34.0,
-                 people_buffer_max_len=3000,
                  temp_th_min=30.0,
                  temp_th_max=36.0,
                  ):
 
-        self.time_buffer_max_len = time_buffer_max_len  # [sec]
+        self.hist_calc_interval = hist_calc_interval  # [sec]
+        self.buffer_max_len = buffer_max_len  # [sec]
         self.hist_percentile = hist_percentile   # [%]
-        self.num_people_for_temp_th = num_people_for_temp_th
+        self.N_samples_for_temp_th = N_samples_for_temp_th
+        self.N_samples_for_first_temp_th = N_samples_for_first_temp_th
         self.temp_th_nominal = temp_th_nominal
         self.temp_th_min = temp_th_min
         self.temp_th_max = temp_th_max
         self.is_initialized = False  # True after first temp_th calculation
 
-        # Initialize People Cyclic Buffer
-        self.people_buffer_max_len = people_buffer_max_len
-        self.people_buffer = cyclicBuffer((self.people_buffer_max_len,) + (1,))
+        # Initialize Cyclic Buffer
+        self.shape_element = (3,)  #  each buffer element is comprised of ndarray of [time, temp, id]
+        self.shape_buffer = (self.buffer_max_len,) + self.shape_element
+        self.buffer = cyclicBuffer(self.shape_buffer)
 
-        # Initialize Time Buffer
-        self.time_buffer_max_len = time_buffer_max_len
-        self.time_buffer = cyclicBuffer((self.time_buffer_max_len,) + (1,))
-
+        # initialize temperature threshold
         self.temp_th = self.temp_th_nominal
 
 
-    def write_sample(self, temp, time_stamp):
+    def write_sample(self, time_stamp, temp, id=[None]):
 
-        temp = np.array(temp)
         time_stamp = np.array(time_stamp)
+        temp = np.array(temp)
+        id = np.array(id)
 
-        self.people_buffer.write(temp)
-        self.time_buffer.write(time_stamp)
+        element = np.stack((time_stamp, temp, id), axis=1)
+
+        self.buffer.write(element)
 
     def num_elements_written(self):
 
         return self.time_buffer.num_elements_written()
 
 
-    def num_elements_in_time_interval(self, time_interval):
+    def num_elements_in_time_interval(self, time_current, time_interval):
 
         # read all time
-        time_vec_all = self.time_buffer.read(self.time_buffer.length)
+        time_vec_all = self.buffer.read(self.buffer.length)[:, 0]
 
         # find indices of wanted time interval
         time_th = time_current - time_interval
@@ -182,19 +194,51 @@ class TemperatureHistogram(object):
         return N
 
 
+    def read_elements_in_time_interval(self, time_current, time_interval):
 
-    def calculate_temperature_threshold(self, time_current, time_buffer_max_len=None, display=False):
+        # read all time
+        data = self.buffer.read(self.buffer.length)
+        time_vec_all = data[:, 0]
+        temp_vec_all = data[:, 1]
+        id_vec_all = data[:, 2]
 
-        if time_buffer_max_len is None:
-            time_buffer_max_len = self.time_buffer_max_len
+        # find indices of wanted time interval
+        time_th = time_current - time_interval
+        ind = np.where(time_vec_all > time_th)[0]
+
+        # get data values of wanted time interval
+        time_vec = time_vec_all[ind]
+        temp_vec = temp_vec_all[ind]
+        id_vec = id_vec_all[ind]
+        N = len(ind)
+
+        return time_vec, temp_vec, id_vec, N
+
+
+    def read_N_elements(self, N):
+
+        data = self.buffer.read(N)
+        time_vec = data[:, 0]
+        temp_vec = data[:, 1]
+        id_vec = data[:, 2]
+        N = len(time_vec)
+
+        return time_vec, temp_vec, id_vec, N
+
+
+    def calculate_temperature_threshold(self, time_current, hist_calc_interval=None, display=False):
+
+        if hist_calc_interval is None:
+            hist_calc_interval = self.hist_calc_interval
 
         bins, hist, temp_percentage, N_samples = \
-            TemperatureHistogram.calculate_temperature_histogram(self.time_buffer, self.temp_buffer, time_buffer_max_len, time_current, hist_percentile=hist_percentile, display=display)
+            TemperatureHistogram.calculate_temperature_histogram(self.buffer, hist_calc_interval, time_current,
+                                                                 hist_percentile=self.hist_percentile, display=display)
 
-        alpha = float(N_samples) / num_people_for_temp_th
+        alpha = float(N_samples) / self.N_samples_for_temp_th
         alpha = np.clip(alpha, 0., 1.)
 
-        temp_th = alpha * temp_percentage + (1 - alpha) * temp_th_nominal
+        temp_th = alpha * temp_percentage + (1 - alpha) * self.temp_th_nominal
 
         temp_th = np.clip(temp_th, a_min=self.temp_th_min, a_max=self.temp_th_max)
 
@@ -209,15 +253,16 @@ class TemperatureHistogram(object):
 
 
     @staticmethod
-    def calculate_temperature_histogram(time_buffer, temp_buffer, time_buffer_max_len, time_current, hist_percentile=0.8,
-                            display=False):
+    def calculate_temperature_histogram(buffer, hist_calc_interval, time_current, hist_percentile=0.85, display=False):
 
         # read all data from buffers
-        temp_vec_all = temp_buffer.read(temp_buffer.length)
-        time_vec_all = time_buffer.read(time_buffer.length)
+        data = buffer.read(buffer.length)
+        time_vec_all = data[:, 0]
+        temp_vec_all = data[:, 1]
+        id_vec_all = data[:, 2]
 
         # find indices of wanted time interval
-        time_th = time_current - time_buffer_max_len
+        time_th = time_current - hist_calc_interval
         ind = np.where((time_vec_all > time_th) & (temp_vec_all > 0))[0]
 
         # get temperature values of wanted time interval
@@ -225,8 +270,8 @@ class TemperatureHistogram(object):
 
         # calculate histogram
         bin_edges = np.arange(25.0, 40.0, 0.1)
-        bins, hist, y_percentage = TemperatureHistogram.calc_hist(x=temp_vec, bin_edges=bin_edges, cdf_percentage=hist_percentile,
-                                             display=display)
+        bins, hist, y_percentage = TemperatureHistogram.calc_hist(x=temp_vec, bin_edges=bin_edges,
+                                                                  cdf_percentage=hist_percentile, display=display)
 
         N_samples = len(temp_vec)
 
@@ -440,7 +485,83 @@ def display_new_people_on_image(image, image_id, current_frame_faces):
         show_boxes(image, two_d_current_frame_faces, scale=1.0)
 
 
-if __name__ == '__main__':
+def main_simple_temperature_histogram():
+    # ------------------------
+    # simulation parameters
+    # ------------------------
+
+    # simulate people flow
+    expected_number_of_people_hour = 100.
+    lambda_poisson_hour = expected_number_of_people_hour / 60.  #  60 minutes
+    lambda_poisson = lambda_poisson_hour / (60.)  # probability per second
+
+    # temperature
+    tmp_mean = 33.5  # [celsius]
+    temp_std = 1.  # [celsius]
+
+    # # simulation length
+    N_sec = 2 * 60 * 60  # [sec]
+
+    display = True
+
+    # ------------------------
+    # temperature histogram parameters
+    # ------------------------
+
+    hist_calc_interval = 30 * 60  # [sec]
+    hist_percentile = 0.85
+    N_samples_for_temp_th = 50
+    N_samples_for_first_temp_th = 20
+    temp_th_nominal = 34.0
+    buffer_max_len = 3000  #
+    temp_th_min = 30.0
+    temp_th_max = 36.0
+
+    temp_hist = TemperatureHistogram(hist_calc_interval=hist_calc_interval,
+                                     hist_percentile = hist_percentile,
+                                     N_samples_for_temp_th=N_samples_for_temp_th,
+                                     temp_th_nominal=temp_th_nominal,
+                                     buffer_max_len=buffer_max_len,
+                                     temp_th_min=temp_th_min,
+                                     temp_th_max=temp_th_max,
+                                     )
+
+    # time_start = time.time()
+    time_start = 0
+
+    for n in range(N_sec):
+
+        # time_current = time.time()
+        time_current = n
+
+        # sample people enterance
+        prob_people = np.random.poisson(lam=lambda_poisson, size=(1,))[0]
+
+        if prob_people > 0.5:
+
+            # sample temprature
+            temp = np.array([np.random.normal(tmp_mean, temp_std)])
+
+            # get current time
+            time_stamp = np.array([time_current])
+
+            # write temp and time_stamp to buffer
+            temp_hist.write_sample(temp=temp, time_stamp=time_stamp)
+
+        # initalize temp_th
+        if not temp_hist.is_initialized and (temp_hist.buffer.getNumOfElementsToRead() > temp_hist.N_samples_for_first_temp_th):
+            temp_th = temp_hist.calculate_temperature_threshold(time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval, display=display)
+
+        # calculate temperature histogram
+        if (np.mod(n, temp_hist.hist_calc_interval) == 0) and (n > 0) and (temp_hist.buffer.getNumOfElementsToRead() > temp_hist.N_samples_for_first_temp_th):
+            temp_th = temp_hist.calculate_temperature_threshold(time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval, display=display)
+
+
+    print ('Done')
+
+
+def main_temperature_histogram_with_face_tracking():
+
     time_buffer_max_len = 30 * 60 * 7  # [num_minutes * sec_in_minute * images_per_sec]
     temp_th_nominal = 34.0
     people_buffer_max_len = 3000
@@ -450,7 +571,7 @@ if __name__ == '__main__':
     # ------------------------------
     # Images folder to simulate on:
     # ------------------------------
-    imgpath = '/home/zvipe/face_fever_detection/face_fever_detection_images/2020_30_03__11_09_03/'
+    imgpath = '/home/moshes2/Projects/face_fever_detection/data/2020_30_03__11_09_03/png_im/'
 
     # ------------------------------------
     # Temperature histogram initialization
@@ -478,54 +599,13 @@ if __name__ == '__main__':
         display_new_people_on_image(image, image_id, new_faces_from_buffer)
 
 
-    # ------------------------
-    # simulation parameters
-    # ------------------------
-    # simulate people flow
-    expected_number_of_people_hour = 100
- #   lambda_poisson_hour = expected_number_of_people_hour / 60  #  60 minutes
- #   lambda_poisson = lambda_poisson_hour / (60)  # probability per second
-    # temperature
- #   tmp_mean = 33.5  # [celsius]
- #   temp_std = 1.  # [celsius]
-
-    # # simulation length
- #   N_sec = 2 * 60 * 60  # [sec]
-
- #   display = True
 
 
+if __name__ == '__main__':
 
-    # time_start = time.time()
- #  time_start = 0
+    main_simple_temperature_histogram()
 
-#    for n in range(N_sec):
-
-        # time_current = time.time()
-        # time_current = n
-        #
-        # # sample people enterance
-        # prob_people = np.random.poisson(lam=lambda_poisson, size=(1,))[0]
-        #
-        # if prob_people > 0.5:
-        #
-        #     # sample temprature
-        #     temp = np.array([np.random.normal(tmp_mean, temp_std)])
-        #
-        #     # get current time
-        #     time_stamp = np.array([time_current])
-        #
-        #     # write temp and time_stamp to buffer
-        #     temperature_histogram.write_sample(temp=temp, time_stamp=time_stamp)
-        #
-        # # initalize temp_th
-        # if not temperature_histogram.is_initialized and (temperature_histogram.num_elements_in_time_interval(time_current - time_start) > num_people_for_first_temp_th):
-        #     temp_th = temperature_histogram.calculate_temperature_threshold(time_current=time_current, time_buffer_max_len=temperature_histogram.time_buffer_max_len, display=display)
-        #
-        # # calculate temprature histogram
-        # if (np.mod(n, temperature_histogram.time_buffer_max_len) == 0) and (n > 0):
-        #     temp_th = temperature_histogram.calculate_temperature_threshold(time_current=time_current, time_buffer_max_len=temperature_histogram.time_buffer_max_len, display=display)
-
+    # main_temperature_histogram_with_face_tracking()
 
     print ('Done')
 
