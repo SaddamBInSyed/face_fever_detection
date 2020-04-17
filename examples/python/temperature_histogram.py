@@ -234,7 +234,7 @@ class TemperatureHistogram(object):
 
         return time_vec, temp_vec, id_vec, N
 
-    def calculate_temp_statistic(self, time_current, hist_calc_interval=None):
+    def calculate_temp_statistic(self, curr_measure, time_current, hist_calc_interval=None):
 
         # read all data from buffers
         data = self.buffer.read(self.buffer.length)
@@ -253,7 +253,7 @@ class TemperatureHistogram(object):
 
         measure_mean = np.mean(temp_vec)
         measure_std = np.std(temp_vec)
-        curr_measure = temp_vec[-1]
+        # curr_measure = temp_vec[-1]
 
         epsilon = 0.02
         sigma_prior = 0.6
@@ -627,14 +627,13 @@ def main_simple_temperature_histogram():
 
         # initalize temp_th
         if not temp_hist.is_initialized and (temp_hist.buffer.getNumOfElementsToRead() > temp_hist.N_samples_for_first_temp_th):
-            # temp_th = temp_hist.calculate_temperature_threshold(time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval, display=display)
-
-            dc_offset = temp_hist.calculate_temp_statistic(time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval)
+            temp_th = temp_hist.calculate_temperature_threshold(time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval, display=display)
+            dc_offset, temp_estimation, temp_probability = temp_hist.calculate_temp_statistic(temp, time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval)
 
         # calculate temperature histogram
         if (np.mod(n, temp_hist.hist_calc_interval) == 0) and (n > 0) and (temp_hist.buffer.getNumOfElementsToRead() > temp_hist.N_samples_for_first_temp_th):
-            # temp_th = temp_hist.calculate_temperature_threshold(time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval, display=display)
-            dc_offset = temp_hist.calculate_temp_offset(time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval)
+            temp_th = temp_hist.calculate_temperature_threshold(time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval, display=display)
+            dc_offset, temp_estimation, temp_probability = temp_hist.calculate_temp_statistic(temp, time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval)
 
 
     print ('Done')
