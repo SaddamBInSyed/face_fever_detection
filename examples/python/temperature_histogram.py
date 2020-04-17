@@ -341,12 +341,23 @@ class TemperatureHistogram(object):
             plt.grid()
 
             plt.tight_layout()
-            manager = plt.get_current_fig_manager()
-            manager.window.showMaximized()
+            pyplot_maximize_plot()
             plt.show(block=False)
             plt.pause(1e-3)
 
         return bins, hist, y_percentage
+
+
+def pyplot_maximize_plot():
+
+    plot_backend = matplotlib.get_backend()
+    mng = plt.get_current_fig_manager()
+    if plot_backend == 'TkAgg':
+        mng.resize(*mng.window.maxsize())
+    elif plot_backend == 'wxAgg':
+        mng.frame.Maximize(True)
+    elif plot_backend == 'Qt4Agg':
+        mng.window.showMaximized()
 
 
 def read_and_display_image(imgpath, filename):
