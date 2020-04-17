@@ -2,6 +2,8 @@
 from __future__ import print_function, division, unicode_literals
 import numpy as np
 from scipy import interpolate
+from scipy.special import erf
+from scipy.stats import norm
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
@@ -11,6 +13,7 @@ import time
 import sys
 sys.path.append(os.path.dirname(__file__))
 from facesIDtracker import facesIdTracker
+from findDC import CFindDC
 
 
 class cyclicBuffer(object):
@@ -163,6 +166,10 @@ class TemperatureHistogram(object):
         # initialize face tracker
         self.faces_tracker = facesIdTracker()
 
+        # initialize find temperture DC offset
+        self.find_DC = CFindDC()
+
+
 
     def write_sample(self, time_stamp, temp, id=[None]):
 
@@ -227,6 +234,50 @@ class TemperatureHistogram(object):
 
         return time_vec, temp_vec, id_vec, N
 
+    def calculate_temp_statistic(self, time_current, hist_calc_interval=None):
+
+        # read all data from buffers
+        data = self.buffer.read(self.buffer.length)
+        time_vec_all = data[:, 0]
+        temp_vec_all = data[:, 1]
+        id_vec_all = data[:, 2]
+
+        # find indices of wanted time interval
+        time_th = time_current - hist_calc_interval
+        ind = np.where((time_vec_all > time_th) & (temp_vec_all > 0))[0]
+
+        # get temperature values of wanted time interval
+        temp_vec = temp_vec_all[ind]
+        dcMaxLike, dcMeanLike = self.find_DC.findDC(temp_vec)
+        offset = dcMaxLike
+
+        measure_mean = np.mean(temp_vec)
+        measure_std = np.std(temp_vec)
+        curr_measure = temp_vec[-1]
+
+        epsilon = 0.02
+        sigma_prior = 0.6
+        sigma_measure = 0.4
+        temp = np.linspace(31, 42, 100)
+        measure_given_temp_sample = np.random.normal(curr_measure - offset, sigma_measure, (1000000, 1))
+        hist_measure_given_temp =  np.histogram(measure_given_temp_sample, bins=temp)
+        p_measure_given_temp = np.double(hist_measure_given_temp[0])/hist_measure_given_temp[0].sum()
+        p_measure = (erf((curr_measure + epsilon - measure_mean) / (measure_std*np.sqrt(2))) - erf((curr_measure - epsilon - measure_mean) / (measure_std*np.sqrt(2)))) / 2
+        # measure_sample = np.random.normal(curr_measure - offset, 0.7, (100000, 1))
+
+
+        temp_samples = np.random.normal(36.77, sigma_prior, (1000000, 1))
+        hist_temp =np.histogram(temp_samples, bins=temp)
+        p_temp = np.double(hist_temp[0])/hist_temp[0].sum()
+        p_temp_given_measure = p_temp * p_measure_given_temp / p_measure
+        # p_temp_given_measure = p_temp_given_measure / p_temp_given_measure.sum()
+
+        ind = np.argmax(p_temp_given_measure)
+        temp_est = temp[ind]
+        temp_prob = p_temp_given_measure[ind]
+
+
+        return offset, temp_est, temp_prob
 
     def calculate_temperature_threshold(self, time_current, hist_calc_interval=None, display=False):
 
@@ -576,11 +627,14 @@ def main_simple_temperature_histogram():
 
         # initalize temp_th
         if not temp_hist.is_initialized and (temp_hist.buffer.getNumOfElementsToRead() > temp_hist.N_samples_for_first_temp_th):
-            temp_th = temp_hist.calculate_temperature_threshold(time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval, display=display)
+            # temp_th = temp_hist.calculate_temperature_threshold(time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval, display=display)
+
+            dc_offset = temp_hist.calculate_temp_statistic(time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval)
 
         # calculate temperature histogram
         if (np.mod(n, temp_hist.hist_calc_interval) == 0) and (n > 0) and (temp_hist.buffer.getNumOfElementsToRead() > temp_hist.N_samples_for_first_temp_th):
-            temp_th = temp_hist.calculate_temperature_threshold(time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval, display=display)
+            # temp_th = temp_hist.calculate_temperature_threshold(time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval, display=display)
+            dc_offset = temp_hist.calculate_temp_offset(time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval)
 
 
     print ('Done')
@@ -611,7 +665,7 @@ def main_temperature_histogram_with_face_tracking():
     #                                              temp_th_max=temp_th_max,
     #                                              )
 
-    imgpath = '/home/moshes2/Projects/face_fever_detection/data/2020_30_03__11_09_03/png_im/'
+    imgpath = 'data/2020_30_03__11_09_03/png_im/'
     display = True
 
     hist_calc_interval = 30 * 60  # [sec]
@@ -653,9 +707,9 @@ def main_temperature_histogram_with_face_tracking():
 
 if __name__ == '__main__':
 
-    # main_simple_temperature_histogram()
+    main_simple_temperature_histogram()
 
-    main_temperature_histogram_with_face_tracking()
+    # main_temperature_histogram_with_face_tracking()
 
     print ('Done')
 
