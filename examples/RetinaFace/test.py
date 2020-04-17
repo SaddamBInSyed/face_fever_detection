@@ -12,9 +12,9 @@ thresh = 0.8
 scales = [1024, 1980]
 
 count = 1
-gpuid = 0
-detector = RetinaFace('./models/R50', 0, gpuid, 'net3')
-test_dataset = '/home/nvidia/Desktop/thermapp_testing/for pony/'
+gpuid = -1
+detector = RetinaFace(model_path='./models/R50',use_TRT=False, epoch=0,ctx_id=gpuid, network= 'net3')
+test_dataset = '/home/origan/pony/ir_images/2020_30_03__11_09_03/png_im/'
     # with open(testset_list, 'r') as fr:
     #     test_dataset = fr.read().split()
 num_images = len(os.listdir(test_dataset))

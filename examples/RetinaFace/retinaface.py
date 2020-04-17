@@ -3,9 +3,6 @@ import sys
 import os
 import datetime
 import time
-import tensorrt as trt
-import pycuda.autoinit
-import pycuda.driver as cuda
 import numpy as np
 import cv2
 #from rcnn import config
@@ -96,9 +93,9 @@ def trt_alloc_buf(engine):
 
 class RetinaFace:
 
-  def __init__(self, prefix, TRT_engine_path= '../RetinaFace/models/R50_SOFTMAX.engine',
+  def __init__(self, model_path= '../RetinaFace/models/R50_SOFTMAX.engine', use_TRT=False,
                epoch=0, ctx_id=0, network='net3', nms=0.4,
-               nocrop=False, decay4 = 0.5, vote=False, use_TRT=False, image_size = (384, 288)):
+               nocrop=False, decay4 = 0.5, vote=False, image_size = (384, 288)):
     self.ctx_id = ctx_id
     self.network = network
     self.decay4 = decay4
@@ -109,10 +106,8 @@ class RetinaFace:
     self.fpn_keys = []
     self.anchor_cfg = None
     self.image_size_wh = image_size
+    self.mxmodel=None
     self.use_TRT = use_TRT
-    self.TRT_engine_path =TRT_engine_path
-    self.TRT_init_ok = False
-    self.TRT_LOGGER = trt.Logger(trt.Logger.VERBOSE) if self.debug else trt.Logger()
 
     pixel_means=[0.0, 0.0, 0.0]
     pixel_stds=[1.0, 1.0, 1.0]
@@ -230,8 +225,39 @@ class RetinaFace:
     self.bbox_stds = [1.0, 1.0, 1.0, 1.0]
     self.landmark_std = 1.0
 
-    self.init_trt()
-    self.output_shapes = convert_output_shape(w=self.image_size_wh[0], h=self.image_size_wh[1])
+
+    if self.use_TRT:
+        global trt
+        global cuda_autoinit
+        global cuda
+
+        import tensorrt as trt
+        import pycuda.autoinit as cuda_autoinit
+        import pycuda.driver as cuda
+        self.TRT_engine_path = model_path
+        self.TRT_init_ok = False
+        self.TRT_LOGGER = trt.Logger(trt.Logger.VERBOSE) if self.debug else trt.Logger()
+        self.init_trt()
+        self.forward = self.forward_trt
+        self.output_shapes = convert_output_shape(w=self.image_size_wh[0], h=self.image_size_wh[1])
+
+    else:
+        global mx
+        global  nd
+        import mxnet as mx
+        from mxnet import ndarray as nd
+
+        if self.ctx_id >= 0:
+            self.ctx = mx.gpu(self.ctx_id)
+        else:
+            self.ctx = mx.cpu()
+        sym, arg_params, aux_params = mx.model.load_checkpoint(model_path, epoch)
+        self.mxmodel = mx.mod.Module(symbol=sym, context=self.ctx, label_names = None)
+        self.mxmodel.bind(data_shapes=[('data', (1, 3, self.image_size_wh[0], self.image_size_wh[1]))], for_training=False)
+        self.mxmodel.set_params(arg_params, aux_params)
+
+        self.forward =self.forward_mxnet
+
 
 
 
@@ -244,6 +270,28 @@ class RetinaFace:
     data = nd.array(im_tensor)
     return data
 
+
+  def forward_mxnet(self,im_tensor):
+        data = nd.array(im_tensor)
+        db = mx.io.DataBatch(data=(data,), provide_data=[('data', data.shape)])
+        self.mxmodel.forward(db, is_train=False)
+        net_out = self.mxmodel.get_outputs()
+
+        return net_out
+
+
+  def init_mxnet(self):
+
+      if self.ctx_id >= 0:
+          self.ctx = mx.gpu(self.ctx_id)
+      else:
+          self.ctx = mx.cpu()
+      sym, arg_params, aux_params = mx.model.load_checkpoint(prefix, epoch)
+      self.model = mx.mod.Module(symbol=sym, context=self.ctx, label_names=None)
+      self.model.bind(data_shapes=[('data', (1, 3, self.image_size_wh[0], self.image_size_wh[1]))],
+                      for_training=False)
+      self.model.set_params(arg_params, aux_params)
+
   def convert_trt_output_shape(self,trt_outputs ):
 
       trt_outputs = [output.reshape(shape) for output, shape
@@ -251,21 +299,21 @@ class RetinaFace:
 
       return trt_outputs
 
-  def _load_engine(self):
+  def _load_engine(self,TRT_engine_path ):
 
-        if not os.path.exists(self.TRT_engine_path):
+        if not os.path.exists(TRT_engine_path):
             return None
 
-        with open(self.TRT_engine_path, 'rb') as f, trt.Runtime(self.TRT_LOGGER) as runtime:
+        with open(TRT_engine_path, 'rb') as f, trt.Runtime(self.TRT_LOGGER) as runtime:
             return runtime.deserialize_cuda_engine(f.read())
 
 
   def _create_context(self):
         return self.engine.create_execution_context()
 
-  def init_trt(self):
+  def init_trt(self,TRT_engine_path):
 
-        self.engine = self._load_engine()
+        self.engine = self._load_engine(TRT_engine_path)
 
         if not self.engine:
             self.TRT_init_ok = False
@@ -358,12 +406,12 @@ class RetinaFace:
 
           if self.debug:
               timea = datetime.datetime.now()
-              net_out = self.forward(im_tensor, is_train=False)
+              net_out = self.forward(im_tensor)
               timeb = datetime.datetime.now()
               diff = timeb - timea
               print('RetinaFace forward', diff.total_seconds(), 'seconds')
           else:
-              net_out = self.forward(im_tensor, is_train=False)
+              net_out = self.forward(im_tensor)
 
           #post_nms_topN = self._rpn_post_nms_top_n
           #min_size_dict = self._rpn_min_size_fpn
@@ -381,7 +429,7 @@ class RetinaFace:
               #if self.vote and stride==4 and len(scales)>2 and (im_scale==scales[0]):
               #  continue
               #print('getting', im_scale, stride, idx, len(net_out), data.shape, file=sys.stderr)
-              scores = net_out[sym_idx]
+              scores = net_out[sym_idx].asnumpy()
               if self.debug:
                 timeb = datetime.datetime.now()
                 diff = timeb - timea
@@ -390,7 +438,7 @@ class RetinaFace:
               #print('scores',stride, scores.shape, file=sys.stderr)
               scores = scores[:, self._num_anchors['stride%s'%s]:, :, :]
 
-              bbox_deltas = net_out[sym_idx+1]
+              bbox_deltas = net_out[sym_idx+1].asnumpy()
 
               #if DEBUG:
               #    print 'im_size: ({}, {})'.format(im_info[0], im_info[1])
@@ -427,6 +475,7 @@ class RetinaFace:
               bbox_deltas[:, 1::4] = bbox_deltas[:,1::4] * self.bbox_stds[1]
               bbox_deltas[:, 2::4] = bbox_deltas[:,2::4] * self.bbox_stds[2]
               bbox_deltas[:, 3::4] = bbox_deltas[:,3::4] * self.bbox_stds[3]
+              bbox_deltas=bbox_deltas
               proposals = self.bbox_pred(anchors, bbox_deltas)
 
 
@@ -441,7 +490,7 @@ class RetinaFace:
                 for diff_idx in __idx:
                   if sym_idx+diff_idx>=len(net_out):
                     break
-                  body = net_out[sym_idx+diff_idx]
+                  body = net_out[sym_idx+diff_idx].asnumpy()
                   if body.shape[1]//A==2: #cls branch
                     if cls_cascade or bbox_cascade:
                       break
@@ -509,7 +558,7 @@ class RetinaFace:
                 strides_list.append(_strides)
 
               if not self.vote and self.use_landmarks:
-                landmark_deltas = net_out[sym_idx+2]
+                landmark_deltas = net_out[sym_idx+2].asnumpy()
                 #landmark_deltas = self._clip_pad(landmark_deltas, (height, width))
                 landmark_pred_len = landmark_deltas.shape[1]//A
                 landmark_deltas = landmark_deltas.transpose((0, 2, 3, 1)).reshape((-1, 5, landmark_pred_len//5))
