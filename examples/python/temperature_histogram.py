@@ -2,6 +2,8 @@
 from __future__ import print_function, division, unicode_literals
 import numpy as np
 from scipy import interpolate
+from scipy.special import erf
+from scipy.stats import norm
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
@@ -11,6 +13,7 @@ import time
 import sys
 sys.path.append(os.path.dirname(__file__))
 from facesIDtracker import facesIdTracker
+from findDC import CFindDC
 
 
 class cyclicBuffer(object):
@@ -68,6 +71,31 @@ class cyclicBuffer(object):
         self.indWrite = (self.indWrite + N) % self.length
 
 
+    def rewrite(self, x):
+        """
+        Rewrite x to buffer, by replacing last len(x) elements by x.
+
+        Parameters
+        ----------
+        x : ndarray
+            Array to write to buffer
+
+        Returns
+        ----------
+        None.
+
+        """
+
+        # get x length
+        N = x.shape[0]
+
+        # rewind indWrite
+        self.indWrite = (self.indWrite - N) % self.length
+
+        # write x
+        self.write(x)
+
+
     def read(self, N, advance_read_index=False):
         """
         Read N elements from buffer.
@@ -95,6 +123,32 @@ class cyclicBuffer(object):
             self.indRead = (self.indRead + N) % self.length
 
         return y
+
+
+    def read_last_elements(self, N):
+            """
+            Read last N elements from buffer.
+
+            Parameters
+            ----------
+            N : ndarray
+                Number of elements to be read from buffer.
+
+            Returns
+            ----------
+            y : ndarray
+                Data read from buffer
+
+            """
+
+            # calculate read indices
+            indReadStart = self.indWrite - N
+            inds = (indReadStart + np.arange(N)) % self.length
+
+            # read data from buffer
+            y = self.buf[inds]
+
+            return y
 
     def getNumOfElementsToRead(self):
 
@@ -163,6 +217,10 @@ class TemperatureHistogram(object):
         # initialize face tracker
         self.faces_tracker = facesIdTracker()
 
+        # initialize find temperture DC offset
+        self.find_DC = CFindDC()
+
+
 
     def write_sample(self, time_stamp, temp, id=[None]):
 
@@ -182,7 +240,7 @@ class TemperatureHistogram(object):
     def num_elements_in_time_interval(self, time_current, time_interval):
 
         # read all time
-        time_vec_all = self.buffer.read(self.buffer.length)[:, 0]
+        time_vec_all = self.buffer.read_last_elements(self.buffer.length)[:, 0]
 
         # find indices of wanted time interval
         time_th = time_current - time_interval
@@ -198,8 +256,8 @@ class TemperatureHistogram(object):
 
     def read_elements_in_time_interval(self, time_current, time_interval):
 
-        # read all time
-        data = self.buffer.read(self.buffer.length)
+        # read all buffer
+        data = self.buffer.read_last_elements(self.buffer.length)
         time_vec_all = data[:, 0]
         temp_vec_all = data[:, 1]
         id_vec_all = data[:, 2]
@@ -219,13 +277,72 @@ class TemperatureHistogram(object):
 
     def read_N_elements(self, N):
 
-        data = self.buffer.read(N)
+        data = self.buffer.read_last_elements(N)
         time_vec = data[:, 0]
         temp_vec = data[:, 1]
         id_vec = data[:, 2]
         N = len(time_vec)
 
         return time_vec, temp_vec, id_vec, N
+
+    def calculate_temp_statistic(self, curr_measure, time_current, hist_calc_interval=None):
+
+        # read all data from buffers
+        data = self.buffer.read(self.buffer.length)
+        time_vec_all = data[:, 0]
+        temp_vec_all = data[:, 1]
+        id_vec_all = data[:, 2]
+
+        # find indices of wanted time interval
+        time_th = time_current - hist_calc_interval
+        ind = np.where((time_vec_all > time_th) & (temp_vec_all > 0))[0]
+
+        # get temperature values of wanted time interval
+        temp_vec = temp_vec_all[ind]
+        dcMaxLike, dcMeanLike = self.find_DC.findDC(temp_vec)
+        offset = dcMaxLike
+
+        measure_mean = np.mean(temp_vec)
+        measure_std = np.std(temp_vec)
+        # curr_measure = temp_vec[-1]
+
+        epsilon = 0.02
+        sigma_prior = 0.6
+        sigma_measure = 0.4
+        temp = np.linspace(31, 42, 100)
+        measure_given_temp_sample = np.random.normal(curr_measure - offset, sigma_measure, (1000000, 1))
+        hist_measure_given_temp =  np.histogram(measure_given_temp_sample, bins=temp)
+        p_measure_given_temp = np.double(hist_measure_given_temp[0])/hist_measure_given_temp[0].sum()
+        p_measure = (erf((curr_measure + epsilon - measure_mean) / (measure_std*np.sqrt(2))) - erf((curr_measure - epsilon - measure_mean) / (measure_std*np.sqrt(2)))) / 2
+        # measure_sample = np.random.normal(curr_measure - offset, 0.7, (100000, 1))
+
+
+        temp_samples = np.random.normal(36.77, sigma_prior, (1000000, 1))
+        hist_temp =np.histogram(temp_samples, bins=temp)
+        p_temp = np.double(hist_temp[0])/hist_temp[0].sum()
+        p_temp_given_measure = p_temp * p_measure_given_temp / p_measure
+        # p_temp_given_measure = p_temp_given_measure / p_temp_given_measure.sum()
+
+        ind = np.argmax(p_temp_given_measure)
+        temp_est = temp[ind]
+        temp_prob = p_temp_given_measure[ind]
+
+
+        return offset, temp_est, temp_prob
+
+    def write_elements(self, time_vec, temp_vec, id_vec):
+
+        data = np.stack((time_vec, temp_vec, id_vec), axis=1)
+
+        self.buffer.write(data)
+
+
+    def rewrite_elements(self, time_vec, temp_vec, id_vec):
+
+        data = np.stack((time_vec, temp_vec, id_vec), axis=1)
+
+        self.buffer.rewrite(data)
+
 
 
     def calculate_temperature_threshold(self, time_current, hist_calc_interval=None, display=False):
@@ -258,7 +375,7 @@ class TemperatureHistogram(object):
     def calculate_temperature_histogram(buffer, hist_calc_interval, time_current, hist_percentile=0.85, display=False):
 
         # read all data from buffers
-        data = buffer.read(buffer.length)
+        data = buffer.read_last_elements(buffer.length)
         time_vec_all = data[:, 0]
         temp_vec_all = data[:, 1]
         id_vec_all = data[:, 2]
@@ -343,25 +460,103 @@ class TemperatureHistogram(object):
             plt.grid()
 
             plt.tight_layout()
-            manager = plt.get_current_fig_manager()
-            manager.window.showMaximized()
+            pyplot_maximize_plot()
             plt.show(block=False)
             plt.pause(1e-3)
 
         return bins, hist, y_percentage
 
 
-    def write_faces_temperature(self, faces):
+    def find_id_indices(self, id_vec, ids_to_search, N=100):
+
+        # find indices of ids in buffer
+        indices_in_buffer = np.where(np.isin(id_vec, ids_to_search, assume_unique=True))[0]
+
+        # find indices of found ids in ids_to_search
+        indices_in_ids_to_search = np.where(np.isin(ids_to_search, id_vec, assume_unique=True))[0]
+
+        return indices_in_buffer, indices_in_ids_to_search
+
+
+
+    def update_faces_temperature(self, faces_list, temp_list, time_stamp, temp_memory=0.25, N=100):
 
         """
-        faces : list
-            Each element in faces is a tuple of (box, temperature)
-            where box is ndarray of [left, top, right, bottom]
+        Updated faces temperature in buffer.
+        Faces ids' are tracked using facesIdTracker():
+            - for existing faces, temperature and time stamp are updated.
+            - for new faces, values are added to buffer.
+
+        faces_list : list
+            List of faces bounding boxes, each element is ndarray of [left, top, right, bottom]
+        temp_list : list
+            List of temperatures corresponding to faces in faces_list.
+        time_stamp : int
+            Current time in seconds.
+        temp_memory: float, optional
+            Weight of previous temperature value.
+        N : int, optional
+            Number of last buffer elements in which faces will be searched.
         """
 
         # track faces ids
+        faces_array = np.stack(faces_list, axis=0)
+        id_faces, temp_mean = self.faces_tracker.giveFacesIds(faces_array, temp_list)
 
-        # update faces temprature
+        # -------------------------
+        # update faces temperature
+        # -------------------------
+
+        # read last N elements from buffer
+        if N == -1:
+            N = self.buffer.length
+
+        # read data from buffer
+        time_vec, temp_vec, id_vec, N = self.read_N_elements(N)
+
+        # search for faces_id in buffer
+        indices_buffer_existing_ids, indices_faces_existing_ids = self.find_id_indices(id_vec, ids_to_search=id_faces)
+
+        # update temperatures and time of existing ids
+        for ind_buffer, ind_faces in zip(indices_buffer_existing_ids, indices_faces_existing_ids):
+
+            # get current temperature
+            temp_prev = temp_vec[ind_buffer]
+
+            # get new temperature
+            temp_new = temp_list[ind_faces]
+
+            # calculate updated temperature and time
+            time_updated = time_stamp
+            temp_updated = temp_memory * temp_prev + (1 - temp_memory) * temp_new
+
+            # update arrays
+            time_vec[ind_buffer] = time_updated
+            temp_vec[ind_buffer] = temp_updated
+
+        # rewrite updated arrays
+        self.rewrite_elements(time_vec, temp_vec, id_vec)
+
+        # write new faces data
+        inds_new = np.setdiff1d(np.arange(len(faces_list)), indices_faces_existing_ids)
+        time_vec_new = np.ones_like(inds_new) * time_stamp
+        temp_vec_new = np.array(temp_list)[inds_new]
+        id_vec_new = id_faces[inds_new]
+
+        self.write_elements(time_vec_new, temp_vec_new, id_vec_new)
+
+        return id_faces, indices_faces_existing_ids
+
+def pyplot_maximize_plot():
+
+    plot_backend = matplotlib.get_backend()
+    mng = plt.get_current_fig_manager()
+    if plot_backend == 'TkAgg':
+        mng.resize(*mng.window.maxsize())
+    elif plot_backend == 'wxAgg':
+        mng.frame.Maximize(True)
+    elif plot_backend == 'Qt4Agg':
+        mng.window.showMaximized()
 
 
 def read_and_display_image(imgpath, filename, display=False):
@@ -373,7 +568,7 @@ def read_and_display_image(imgpath, filename, display=False):
         if display:
             plt.title(filename)
             plt.imshow(image)
-            plt.show()
+            plt.show(block=False)
             plt.pause(0.1)
     return image, int(filename[0:-4])
 
@@ -382,13 +577,15 @@ def detect_faces(image, image_id):
     #this is just my debug code:
     if (image_id%3) == 0 :
         #current_frame_faces is composed of [(np.array([TL_X, TL_Y, BR_X, BR_y]), Temp)]
-        current_frame_faces = [(np.array([10,20,30,40]), 37.0), (np.array([200, 100, 300, 400]), 38), (np.array([50, 50, 150, 150]), 36)]
+        current_frame_faces = [np.array([10,20,30,40]), np.array([200, 100, 300, 400]), np.array([50, 50, 150, 150])]
+        current_temps = [10.0, 20, 30]
     elif (image_id%3) == 1 :
-        current_frame_faces = [(np.array([15,20,30,40]),37.5),  (np.array([200,100,300,400])-500, 38.) , (np.array([50,50,150,150])+20, 16.5)]
+        current_frame_faces = [np.array([15,20,30,40]),  np.array([200,100,300,400])-80, np.array([50,50,150,150])+20]
+        current_temps = [100.0, 200, 300]
     else:
-        current_frame_faces = [(np.array(20,20,30,40), 38)]
-
-    return current_frame_faces
+        current_frame_faces = [np.array(20,20,30,40)]
+        current_temps = [400]
+    return current_frame_faces, current_temps
 
 def write_element_to_temperature_histogram(current_frame_faces, temperature_histogram):
     # get current time
@@ -464,14 +661,20 @@ def check_for_new_faces_and_update_buffers(image, image_id, current_frame_faces,
         return new_frame_faces
 
 
-def show_boxes(im, two_d_current_frame_faces, scale = 1.0):
+def show_boxes(im, two_d_current_frame_faces, temp_list, id_faces, existing_faces_flags, scale = 1.0):
     plt.cla()
     plt.axis("off")
     plt.imshow(im)
 
-    for det in two_d_current_frame_faces :
+    color_new = (0, 0, 1)
+    color_exist = (1, 0, 0)
+
+    for det, temp, id, is_exist in zip(two_d_current_frame_faces, temp_list, id_faces, existing_faces_flags) :
+
         bbox = det[:4] * scale
-        color = (1, 1, 1)
+
+        color = color_exist if is_exist else color_new
+
         rect = plt.Rectangle((bbox[0], bbox[1]),
                               bbox[2] - bbox[0],
                               bbox[3] - bbox[1], fill=False,
@@ -479,25 +682,23 @@ def show_boxes(im, two_d_current_frame_faces, scale = 1.0):
         plt.gca().add_patch(rect)
 
         plt.gca().text(bbox[0], bbox[1],
-                       '{:s}'.format(str(det[4])),
+                       '{:s}'.format(str(temp)),
                        bbox=dict(facecolor=color, alpha=0.5), fontsize=9, color='white')
 
         plt.gca().text(bbox[0]+20, bbox[1],
-                       'ID = {:s}'.format(str(det[5])),
+                       'ID = {:s}'.format(str(id)),
                        bbox=dict(facecolor=color, alpha=0.5), fontsize=9, color='red')
 
     plt.show()
     return im
 
-def display_new_people_on_image(image, image_id, current_frame_faces):
-    global displayImage
-    two_d_current_frame_faces=[]
+def display_new_people_on_image(image, image_id, current_frame_faces, temp_list, id_faces, indices_faces_existing_ids, display=True):
 
-    if len(current_frame_faces):
-        two_d_current_frame_faces = current_frame_faces.reshape(-1,6)
+    #
+    existing_faces_flags = np.isin(np.arange(len(current_frame_faces)), indices_faces_existing_ids)
 
-    if (displayImage == True):
-        show_boxes(image, two_d_current_frame_faces, scale=1.0)
+    if display:
+        show_boxes(image, current_frame_faces, temp_list, id_faces, existing_faces_flags, scale=1.0)
 
 
 def main_simple_temperature_histogram():
@@ -567,10 +768,12 @@ def main_simple_temperature_histogram():
         # initalize temp_th
         if not temp_hist.is_initialized and (temp_hist.buffer.getNumOfElementsToRead() > temp_hist.N_samples_for_first_temp_th):
             temp_th = temp_hist.calculate_temperature_threshold(time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval, display=display)
+            dc_offset, temp_estimation, temp_probability = temp_hist.calculate_temp_statistic(temp, time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval)
 
         # calculate temperature histogram
         if (np.mod(n, temp_hist.hist_calc_interval) == 0) and (n > 0) and (temp_hist.buffer.getNumOfElementsToRead() > temp_hist.N_samples_for_first_temp_th):
             temp_th = temp_hist.calculate_temperature_threshold(time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval, display=display)
+            dc_offset, temp_estimation, temp_probability = temp_hist.calculate_temp_statistic(temp, time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval)
 
 
     print ('Done')
@@ -613,6 +816,9 @@ def main_temperature_histogram_with_face_tracking():
     temp_th_min = 30.0
     temp_th_max = 36.0
 
+    # faces tracker temperature
+    temp_memory = 0.25
+
     temp_hist = TemperatureHistogram(hist_calc_interval=hist_calc_interval,
                                      hist_percentile = hist_percentile,
                                      N_samples_for_temp_th=N_samples_for_temp_th,
@@ -626,15 +832,20 @@ def main_temperature_histogram_with_face_tracking():
     # ------------------------------
     #           Main loop:
     # ------------------------------
-    for filename in sorted(os.listdir(imgpath)):
+    for n, filename in enumerate(sorted(os.listdir(imgpath))):
+
+        # time_current = time.time()
+        time_current = n
 
         image, image_id = read_and_display_image(imgpath, filename, display)
 
-        current_frame_faces = detect_faces(image, image_id)
+        current_frame_faces, current_temps = detect_faces(image, image_id)
 
-        new_faces_from_buffer = check_for_new_faces_and_update_buffers(image, image_id, current_frame_faces, temp_hist, temp_th_nominal)
+        # new_faces_from_buffer = check_for_new_faces_and_update_buffers(image, image_id, current_frame_faces, temp_hist, temp_th_nominal)
 
-        display_new_people_on_image(image, image_id, new_faces_from_buffer)
+        id_faces, indices_faces_existing_ids = temp_hist.update_faces_temperature(faces_list=current_frame_faces, temp_list=current_temps, time_stamp=time_current, temp_memory=temp_memory)
+
+        display_new_people_on_image(image, image_id, current_frame_faces, current_temps, id_faces, indices_faces_existing_ids)
 
 
 
