@@ -583,7 +583,7 @@ def detect_faces(image, image_id):
         current_frame_faces = [np.array([15,20,30,40]),  np.array([200,100,300,400])-80, np.array([50,50,150,150])+20]
         current_temps = [100.0, 200, 300]
     else:
-        current_frame_faces = [np.array(20,20,30,40)]
+        current_frame_faces = [np.array([20,20,30,40])]
         current_temps = [400]
     return current_frame_faces, current_temps
 
@@ -852,9 +852,9 @@ def main_temperature_histogram_with_face_tracking():
 
 if __name__ == '__main__':
 
-    # main_simple_temperature_histogram()
+    main_simple_temperature_histogram()
 
-    main_temperature_histogram_with_face_tracking()
+    # main_temperature_histogram_with_face_tracking()
 
     print ('Done')
 
