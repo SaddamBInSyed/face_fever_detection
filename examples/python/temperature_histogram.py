@@ -275,9 +275,11 @@ class TemperatureHistogram(object):
         ind = np.argmax(p_temp_given_measure)
         temp_est = temp[ind]
         temp_prob = p_temp_given_measure[ind]
+        temp_after_offset = curr_measure - offset
 
-
-        return offset, temp_est, temp_prob
+        if temp_prob == 0:
+            temp_est = temp_after_offset
+        return offset, temp_after_offset, temp_est, temp_prob
 
     def calculate_temperature_threshold(self, time_current, hist_calc_interval=None, display=False):
 
@@ -628,12 +630,12 @@ def main_simple_temperature_histogram():
         # initalize temp_th
         if not temp_hist.is_initialized and (temp_hist.buffer.getNumOfElementsToRead() > temp_hist.N_samples_for_first_temp_th):
             temp_th = temp_hist.calculate_temperature_threshold(time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval, display=display)
-            dc_offset, temp_estimation, temp_probability = temp_hist.calculate_temp_statistic(temp, time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval)
+            dc_offset, temp_after_offset, temp_estimation, temp_probability = temp_hist.calculate_temp_statistic(temp, time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval)
 
         # calculate temperature histogram
         if (np.mod(n, temp_hist.hist_calc_interval) == 0) and (n > 0) and (temp_hist.buffer.getNumOfElementsToRead() > temp_hist.N_samples_for_first_temp_th):
             temp_th = temp_hist.calculate_temperature_threshold(time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval, display=display)
-            dc_offset, temp_estimation, temp_probability = temp_hist.calculate_temp_statistic(temp, time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval)
+            dc_offset, temp_after_offset, temp_estimation, temp_probability = temp_hist.calculate_temp_statistic(temp, time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval)
 
 
     print ('Done')

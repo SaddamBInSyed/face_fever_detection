@@ -1,4 +1,4 @@
-from __future__ import print_function
+from __future__ import print_function, division
 import numpy as np
 
 class facesIdTracker():
@@ -88,7 +88,7 @@ class facesIdTracker():
 
             for i in range(min(faces.shape[0], len(self.savedFacesRect))): #loop to find matches
                 curMaxInd = np.argmax(facesIouMat)
-                row = np.int(curMaxInd) / np.int(facesIouMat.shape[1])
+                row = np.int(curMaxInd) // np.int(facesIouMat.shape[1])
                 col = np.int(curMaxInd) % np.int(facesIouMat.shape[1])
                 if (facesIouMat[row,col] > self.minIouForMatch):
                     newIds[row] = self.savedFacesIds[col]
