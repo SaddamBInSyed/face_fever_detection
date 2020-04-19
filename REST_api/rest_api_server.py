@@ -1,5 +1,3 @@
-
-
 import gevent
 from gevent.monkey import patch_all;
 patch_all()
@@ -16,6 +14,7 @@ import cv2
 import logging
 sys.path.insert(0, '..')
 import examples.python.transformations as transformations
+#from examples.python.temperature_histogram import TemperatureHistogram as TempHist
 
 
 
@@ -23,7 +22,7 @@ homepage = "<h1>REST-API Example</h1><p>This site is a prototype REST-API</p>"
 timings = collections.deque([],maxlen=5)
 
 FACE_DETECTION_THRESH=0.2
-FACE_TEMP_PRECENTILE = [0.8, 1.0]
+FACE_TEMP_PRECENTILE = [0.9, 1.0]
 
 l_ratio = 0.25
 r_ratio = 0.75
@@ -41,6 +40,19 @@ detector = retinaface.RetinaFace(prefix=retina_prefix, TRT_engine_path=trt_engin
 empty_img = np.zeros([288,384,3]).astype('uint8')
 _,_ = detector.detect(empty_img, FACE_DETECTION_THRESH, scales=[1.0], do_flip=False)
 # app.logger.info("Detector ready!")
+# app.logger.info("Initialing Histogram ...")
+hist_calc_interval = 30 * 60  # [sec]
+hist_percentile = 0.85
+N_samples_for_temp_th = 50
+temp_th_nominal = 34.0
+buffer_max_len = 3000  #
+
+# temp_hist = TemperatureHistogram(hist_calc_interval=hist_calc_interval,
+#                                  hist_percentile=hist_percentile,
+#                                  N_samples_for_temp_th=N_samples_for_temp_th,
+#                                  temp_th_nominal=temp_th_nominal,
+#                                  buffer_max_len=buffer_max_len)
+# app.logger.info("Histogram initialized")
 
 def calc_precentile(x, q_min=0.8, q_max=0.95):
 
@@ -80,10 +92,10 @@ def calac_temp_median_of_rect(img, box):
 
 def calac_temp_precentile(img, box):
 
-    top = box[1]
-    left = box[0]
-    bottom = box[3]
-    right = box[2]
+    top = int(box[1])
+    left = int(box[0])
+    bottom = int(box[3])
+    right = int(box[2])
 
     hor_start = int(left)
     hor_end = int(right)
@@ -179,13 +191,19 @@ def predict():
             return flask.jsonify(response)
 
 
+        # detect and track faces
+        image_for_face_detection = temperatures_image_for_human
+        faces_list = detector.detect_and_track_faces(image_for_face_detection, FACE_DETECTION_THRESH, scales=[1.0], do_flip=False)
 
+        # update response
+        response["id"] = id
+        response["faces"] = faces_list
 
-        im_plot = cv2.merge((temperatures_image, temperatures_image, temperatures_image))
-        # im_raw = rgb.copy()
-        im_plot = im_plot - im_plot.min()
-        im_plot = im_plot.astype(np.float32)
-        im_plot = (im_plot / (im_plot.max()) * 255).astype(np.uint8)
+        # im_plot = cv2.merge((temperatures_image, temperatures_image, temperatures_image))
+        # # im_raw = rgb.copy()
+        # im_plot = im_plot - im_plot.min()
+        # im_plot = im_plot.astype(np.float32)
+        # im_plot = (im_plot / (im_plot.max()) * 255).astype(np.uint8)
 
 
         #temperatures_image = np.rot90(temperatures_image, -1)
@@ -210,7 +228,7 @@ def predict():
         app.logger.info('Detection finish ...')
 
         num_predictions = len(faces) if faces is not None else 0
-        print(faces)
+        print('Num of faces {}'.format(num_predictions))
         response["id"] = id
         response["faces"] = []
         for i in range(num_predictions):
@@ -234,30 +252,39 @@ def predict():
             pred['right'] = scale_fatcor_x * int(box[3])
             pred['bottom'] = scale_fatcor_y * int(box[2]) + trans_y
 
-            temp, forehead = calac_temp_median_of_rect(temperatures_image_for_human, faces[i])
-            pred['temp'] = float("%.01f" % temp)
+            temp,forehead=calac_temp_median_of_rect(temperatures_image_for_human, faces[i]) 
+            temp = float("%.01f" % temp)
+            pred['temp'] = temp
             pred['treshold'] = float(36.5)
 
             response["faces"].append(pred)
-            # adding forehead:
-            pred1 = {}
-            box = forehead
 
-            left = box[0]
-            top = box[1]
-            right = box[2]
-            bottom = box[3]
+            # temp_hist.write_sample(temp=temp, time_stamp=time.time())
+            # # calculate temprature histogram
+            # if (np.mod(n, temp_hist.hist_calc_interval) == 0):
+            #     time_current = time.time()
+            #
+            #     temp_th = temp_hist.calculate_temperature_threshold()
 
-            box = np.array([[left, top], [right, bottom]])
-            box = transformations.warp_points(box, Mc_inv).flatten()
-
-            pred1['left'] = scale_fatcor_x * int(box[1])
-            pred1['top'] = scale_fatcor_y * int(box[0]) + trans_y
-            pred1['right'] = scale_fatcor_x * int(box[3])
-            pred1['bottom'] = scale_fatcor_y * int(box[2]) + trans_y
-            pred1['temp'] = 0
-            pred1['treshold'] = float(36.5)
-            response["faces"].append(pred1)
+            # # adding forehead:
+            # pred1 = {}
+            # box = forehead
+            #
+            # left = box[0]
+            # top = box[1]
+            # right = box[2]
+            # bottom = box[3]
+            #
+            # box = np.array([[left, top], [right, bottom]])
+            # box = transformations.warp_points(box, Mc_inv).flatten()
+            #
+            # pred1['left'] = scale_fatcor_x * int(box[1])
+            # pred1['top'] = scale_fatcor_y * int(box[0]) + trans_y
+            # pred1['right'] = scale_fatcor_x * int(box[3])
+            # pred1['bottom'] = scale_fatcor_y * int(box[2]) + trans_y
+            # pred1['temp'] = 0
+            # pred1['treshold'] = float(36.5)
+            # response["faces"].append(pred1)
 
         # indicate that the request was a success
         response["num_predictions"] = len(response["faces"])

@@ -1,4 +1,4 @@
-from __future__ import print_function
+from __future__ import print_function, division
 import sys
 import os
 import datetime
@@ -12,6 +12,10 @@ from rcnn.processing.bbox_transform import clip_boxes
 from rcnn.processing.generate_anchor import generate_anchors_fpn, anchors_plane
 from rcnn.processing.nms import gpu_nms_wrapper, cpu_nms_wrapper
 from rcnn.processing.bbox_transform import bbox_overlaps
+
+sys.path.insert(0, '.')
+import examples.python.transformations as transformations
+from examples.python.temperature_histogram import TemperatureHistogram
 
 # WITH_RESHAPE_SOFTMAX
 OUTPUT_LAYERS  =['face_rpn_cls_score_stride32', 'face_rpn_bbox_pred_stride32', 'face_rpn_landmark_pred_stride32',
@@ -91,11 +95,77 @@ def trt_alloc_buf(engine):
     return inputs, outputs, bindings, stream
 
 
+FACE_DETECTION_THRESH=0.2
+FACE_TEMP_PRECENTILE = [0.9, 1.0]
+
+l_ratio = 0.25
+r_ratio = 0.75
+t_ratio = 0.1
+b_ratio = 0.3
+
+def calc_precentile(x, q_min=0.92, q_max=0.99):
+
+    x_sorterd = np.sort(x.flatten())
+
+    N = len(x_sorterd) - 1
+
+    ind_min = int(np.floor(q_min * N))
+    ind_max = int(np.floor(q_max * N))
+
+    if ind_min < ind_max:
+        y = np.mean(x_sorterd[ind_min:ind_max])
+    else:
+        y = x_sorterd[ind_max]
+
+    return y
+
+
+def calc_temp_median_of_rect(img, box):
+
+    # for temparture calculation - use raw image
+    top = int(box[1])
+    left = int(box[0])
+    bottom = int(box[3])
+    right = int(box[2])
+
+    w = box[2] - box[0]
+    h = box[3] - box[1]
+    hor_start = int(left + l_ratio * w)
+    hor_end = int(left + r_ratio * w)
+    ver_start = int(top + t_ratio * h)
+    ver_end = int(top + b_ratio * h)
+
+    temp_raw = np.median(img[ver_start:ver_end, hor_start:hor_end])
+    forehead_bb = [hor_start, ver_start, hor_end, ver_end]
+    return temp_raw, forehead_bb
+
+
+def calc_temp_precentile(img, box):
+
+    top = int(box[1])
+    left = int(box[0])
+    bottom = int(box[3])
+    right = int(box[2])
+
+    hor_start = int(left)
+    hor_end = int(right)
+    ver_start = int(top)
+    ver_end = int(bottom)
+
+    temp_raw = calc_precentile(img[ver_start:ver_end, hor_start:hor_end], q_min=FACE_TEMP_PRECENTILE[0],
+                               q_max=FACE_TEMP_PRECENTILE[1])
+    return temp_raw
+
+
+
 class RetinaFace:
 
   def __init__(self, model_path= '../RetinaFace/models/R50_SOFTMAX.engine', use_TRT=False,
                epoch=0, ctx_id=0, network='net3', nms=0.4,
                nocrop=False, decay4 = 0.5, vote=False, image_size = (384, 288)):
+
+    self.temp_hist = TemperatureHistogram()
+
     self.ctx_id = ctx_id
     self.network = network
     self.decay4 = decay4
@@ -643,12 +713,126 @@ class RetinaFace:
     else:
       det = np.hstack((proposals[:,0:4], scores)).astype(np.float32, copy=False)
 
-
     if self.debug:
       timeb = datetime.datetime.now()
       diff = timeb - timea
       print('C uses', diff.total_seconds(), 'seconds')
     return det, landmarks
+
+
+  def detect_and_track_faces(self, img, threshold=0.5, scales=[1.0], do_flip=False, verobse=True):
+
+    # rotate image by 90 degrees
+    M = transformations.calculate_affine_matrix(rotation_angle=-90, rotation_center=(0, 0), translation=(0, 0), scale=1)
+    rgb, Mc = transformations.warp_affine_without_crop(img.astype(np.float32), M)
+    # print(M)
+    Mc_inv = transformations.cal_affine_matrix_inverse(Mc)
+
+    # generate 3 channels image
+    rgb = cv2.merge((rgb, rgb, rgb))
+    # im_raw = rgb.copy()
+
+    # convert image to unit8 with range of [0, 255]
+    rgb = rgb - rgb.min()
+    rgb = rgb.astype(np.float32)
+    rgb = (rgb / (rgb.max()) * 255).astype(np.uint8)
+    # cv2.imwrite('after_trn_temp.png',rgb)
+
+    # detect faces
+    faces, landmarks = self.detect(rgb, FACE_DETECTION_THRESH, scales=[1.0], do_flip=False)
+
+    num_predictions = len(faces) if faces is not None else 0
+    if verobse:
+        print('Num of faces {}'.format(num_predictions))
+
+    faces_list = []
+    temp_list = []
+
+    for i in range(num_predictions):
+        pred = {}
+
+        box = faces[i]
+        left = box[0]
+        top = box[1]
+        right = box[2]
+        bottom = box[3]
+        box = np.array([[left, top], [right, bottom]])
+
+        # warp box points (undo 90 degrees rotations)
+        box = transformations.warp_points(box, Mc_inv).flatten()
+
+        # scale box for display
+        scale_fatcor_x = 2.46  # 16.3/6
+        scale_fatcor_y = 25.5 / 28.2
+        trans_y = - 0
+
+        pred['left'] = scale_fatcor_x * int(box[1])
+        pred['top'] = scale_fatcor_y * int(box[0]) + trans_y
+        pred['right'] = scale_fatcor_x * int(box[3])
+        pred['bottom'] = scale_fatcor_y * int(box[2]) + trans_y
+
+        # calculate temperature
+        # option 1 - median temperature of forehead
+        # temp, forehead = calc_temp_median_of_rect(img, faces[i])
+
+        # option 2 - calculate temperature using percentiles
+        temp = calc_temp_precentile(img, faces[i])
+        temp = np.round(temp, 1)
+
+        # save face boxes and temperatures
+        faces_list.append(box)
+        temp_list.append(temp)
+
+    # ----------------------
+    # temperature statistics
+    # ----------------------
+
+    # track faces
+    time_stamp = time.time()
+    if self.temp_hist.use_temperature_histogram:
+
+        # track faces and update temperature histogram
+        self.temp_hist.update_faces_temperature(faces_list, temp_list, time_stamp)
+
+        # initialize temp_th
+        if not self.temp_hist.is_initialized and (self.temp_hist.buffer.getNumOfElementsToRead() > self.temp_hist.N_samples_for_first_temp_th):
+            self.temp_hist.temp_th = self.temp_hist.calculate_temperature_threshold(time_current=time_stamp, hist_calc_interval=self.temp_hist.hist_calc_interval, display=False)
+            self.temp_hist.start_time = time_stamp  # FIXME: should be initialized when first value enters histogram
+
+        # calculate temperature histogram
+        if self.temp_hist.is_initialized and (np.mod(time_stamp - self.temp_hist.start_time, self.temp_hist.hist_calc_every_N_sec) == 0) and (time_stamp - self.temp_hist.start_time > 0):
+
+            # calculate number of elements to read
+            time_interval = self.temp_hist.hist_calc_interval
+            num_elements_in_time_interval = self.temp_hist.num_elements_in_time_interval(time_interval)
+
+            # if number of elements is small - multiply time interval (up to 4 times)
+            if num_elements_in_time_interval < self.temp_hist.N_samples_for_temp_th:
+                time_interval *= 2
+                num_elements_in_time_interval = self.temp_hist.num_elements_in_time_interval(time_interval)
+
+            if num_elements_in_time_interval < self.temp_hist.N_samples_for_temp_th:
+                time_interval *= 2
+                num_elements_in_time_interval = self.temp_hist.num_elements_in_time_interval(time_interval)
+
+            if num_elements_in_time_interval > self.temp_hist.min_N_samples_for_temp_th:
+                self.temp_hist.temp_th = self.temp_hist.calculate_temperature_threshold(time_current=time_stamp, hist_calc_interval=self.temp_hist.hist_calc_interval, display=False)
+            else:
+                self.temp_hist.temp_th_nominal
+
+
+    # estimate true temperature
+    if self.temp_hist.use_temperature_statistics:
+        dc_offset, temp_after_offset, temp_estimation, temp_probability \
+            = self.temp_hist.calculate_temp_statistic(temp, time_current=time_stamp, hist_calc_interval=self.temp_hist.hist_calc_interval)
+
+    # ----------------------
+
+
+    # caclualte output
+
+    return faces_list
+
 
   def detect_center(self, img, threshold=0.5, scales=[1.0], do_flip=False):
     det, landmarks = self.detect(img, threshold, scales, do_flip)
@@ -665,6 +849,7 @@ class RetinaFace:
     bbox = det[bindex,:]
     landmark = landmarks[bindex, :, :]
     return bbox, landmark
+
 
   @staticmethod
   def check_large_pose(landmark, bbox):

@@ -186,25 +186,28 @@ class TemperatureHistogram(object):
 
 
     def __init__(self,
-                 hist_calc_interval=30 * 60, # [sec]
+                 hist_calc_interval=30*60, # [sec]
                  buffer_max_len=120*60*1,  # [minutes * sec * persons_per_sec]
                  hist_percentile=0.85,  # [%]
-                 N_samples_for_temp_th=50,
+                 N_samples_for_temp_th=30,
                  N_samples_for_first_temp_th=20,
                  temp_th_nominal=34.0,
                  temp_th_min=30.0,
-                 temp_th_max=36.0,
+                 temp_th_max=37.0,
                  ):
 
+        self.hist_calc_every_N_sec = 15 * 60  # [sec]
         self.hist_calc_interval = hist_calc_interval  # [sec]
         self.buffer_max_len = buffer_max_len  # [sec]
         self.hist_percentile = hist_percentile   # [%]
         self.N_samples_for_temp_th = N_samples_for_temp_th
+        self.min_N_samples_for_temp_th = 10
         self.N_samples_for_first_temp_th = N_samples_for_first_temp_th
         self.temp_th_nominal = temp_th_nominal
         self.temp_th_min = temp_th_min
         self.temp_th_max = temp_th_max
         self.is_initialized = False  # True after first temp_th calculation
+        self.temp_hist.start_time = time.time()
 
         # Initialize Cyclic Buffer
         self.shape_element = (3,)  #  each buffer element is comprised of ndarray of [time, temp, id]
@@ -219,6 +222,29 @@ class TemperatureHistogram(object):
 
         # initialize find temperture DC offset
         self.find_DC = CFindDC()
+
+        #
+        self.use_temperature_histogram = True
+        self.use_temperature_statistics = True
+
+        # temperature statistics
+        # sigma_prior = 0.6
+        # sigma_measure = 0.4
+        # temps = np.linspace(34, 42, 50)
+        #
+        # temp_samples = np.random.normal(36.77, sigma_prior, (10000, 1))
+        # hist_temp = np.histogram(temp_samples, bins=temps)
+        # nominal_temp_pdf = np.double(hist_temp[0]) / hist_temp[0].sum()
+        #
+        # # needs to be shifted according to measure by curr_measure - offset
+        # measure_given_temp_sample = np.random.normal(0, sigma_measure, (10000, 1))
+        # hist_measure_given_temp = np.histogram(measure_given_temp_sample, bins=temps)
+        # measure_given_temp_pdf = np.double(hist_measure_given_temp[0]) / hist_measure_given_temp[0].sum()
+
+
+
+
+
 
 
 
@@ -287,11 +313,7 @@ class TemperatureHistogram(object):
 
     def calculate_temp_statistic(self, curr_measure, time_current, hist_calc_interval=None):
 
-        # read all data from buffers
-        data = self.buffer.read(self.buffer.length)
-        time_vec_all = data[:, 0]
-        temp_vec_all = data[:, 1]
-        id_vec_all = data[:, 2]
+        time_vec_all, temp_vec_all, id_vec_all, N = self.read_N_elements(self.buffer.length)
 
         # find indices of wanted time interval
         time_th = time_current - hist_calc_interval
