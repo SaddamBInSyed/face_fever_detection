@@ -222,6 +222,8 @@ class TemperatureHistogram(object):
 
         # initialize find temperture DC offset
         self.find_DC = CFindDC()
+        self.dc_offset = - 2.5  # default core-forehead temperature offset
+        self.temp_th_when_using_dc_offset = 37.5
 
         #
         self.use_temperature_histogram = True
@@ -324,33 +326,42 @@ class TemperatureHistogram(object):
         dcMaxLike, dcMeanLike = self.find_DC.findDC(temp_vec)
         offset = dcMaxLike
 
-        measure_mean = np.mean(temp_vec)
-        measure_std = np.std(temp_vec)
-        # curr_measure = temp_vec[-1]
+        if 0:
+            measure_mean = np.mean(temp_vec)
+            measure_std = np.std(temp_vec)
+            # curr_measure = temp_vec[-1]
 
-        epsilon = 0.02
-        sigma_prior = 0.6
-        sigma_measure = 0.4
-        temp = np.linspace(31, 42, 100)
-        measure_given_temp_sample = np.random.normal(curr_measure - offset, sigma_measure, (1000000, 1))
-        hist_measure_given_temp =  np.histogram(measure_given_temp_sample, bins=temp)
-        p_measure_given_temp = np.double(hist_measure_given_temp[0])/hist_measure_given_temp[0].sum()
-        p_measure = (erf((curr_measure + epsilon - measure_mean) / (measure_std*np.sqrt(2))) - erf((curr_measure - epsilon - measure_mean) / (measure_std*np.sqrt(2)))) / 2
-        # measure_sample = np.random.normal(curr_measure - offset, 0.7, (100000, 1))
-
-
-        temp_samples = np.random.normal(36.77, sigma_prior, (1000000, 1))
-        hist_temp =np.histogram(temp_samples, bins=temp)
-        p_temp = np.double(hist_temp[0])/hist_temp[0].sum()
-        p_temp_given_measure = p_temp * p_measure_given_temp / p_measure
-        # p_temp_given_measure = p_temp_given_measure / p_temp_given_measure.sum()
-
-        ind = np.argmax(p_temp_given_measure)
-        temp_est = temp[ind]
-        temp_prob = p_temp_given_measure[ind]
+            epsilon = 0.02
+            sigma_prior = 0.6
+            sigma_measure = 0.4
+            temp = np.linspace(31, 42, 100)
+            measure_given_temp_sample = np.random.normal(curr_measure - offset, sigma_measure, (1000000, 1))
+            hist_measure_given_temp =  np.histogram(measure_given_temp_sample, bins=temp)
+            p_measure_given_temp = np.double(hist_measure_given_temp[0])/hist_measure_given_temp[0].sum()
+            p_measure = (erf((curr_measure + epsilon - measure_mean) / (measure_std*np.sqrt(2))) - erf((curr_measure - epsilon - measure_mean) / (measure_std*np.sqrt(2)))) / 2
+            # measure_sample = np.random.normal(curr_measure - offset, 0.7, (100000, 1))
 
 
-        return offset, temp_est, temp_prob
+            temp_samples = np.random.normal(36.77, sigma_prior, (1000000, 1))
+            hist_temp =np.histogram(temp_samples, bins=temp)
+            p_temp = np.double(hist_temp[0])/hist_temp[0].sum()
+            p_temp_given_measure = p_temp * p_measure_given_temp / p_measure
+            # p_temp_given_measure = p_temp_given_measure / p_temp_given_measure.sum()
+
+            ind = np.argmax(p_temp_given_measure)
+            temp_est = temp[ind]
+            temp_prob = p_temp_given_measure[ind]
+            temp_after_offset = curr_measure - offset
+
+            if temp_prob == 0:
+                temp_est = temp_after_offset
+            return offset, temp_after_offset, temp_est, temp_prob
+        else:
+            temp_after_offset = []
+            temp_est = []
+            temp_prob = []
+
+        return offset, temp_after_offset, temp_est, temp_prob
 
     def write_elements(self, time_vec, temp_vec, id_vec):
 
@@ -501,7 +512,7 @@ class TemperatureHistogram(object):
 
 
 
-    def update_faces_temperature(self, faces_list, temp_list, time_stamp, temp_memory=0.25, N=100):
+    def update_faces_temperature(self, faces_list, temp_list, time_stamp, temp_memory=0.4, N=100):
 
         """
         Updated faces temperature in buffer.
@@ -568,6 +579,7 @@ class TemperatureHistogram(object):
         self.write_elements(time_vec_new, temp_vec_new, id_vec_new)
 
         return id_faces, indices_faces_existing_ids
+
 
 def pyplot_maximize_plot():
 

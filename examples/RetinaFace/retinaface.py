@@ -745,6 +745,10 @@ class RetinaFace:
     if verobse:
         print('Num of faces {}'.format(num_predictions))
 
+    left_list = []
+    top_list = []
+    right_list = []
+    bottom_list = []
     faces_list = []
     temp_list = []
 
@@ -766,10 +770,10 @@ class RetinaFace:
         scale_fatcor_y = 25.5 / 28.2
         trans_y = - 0
 
-        pred['left'] = scale_fatcor_x * int(box[1])
-        pred['top'] = scale_fatcor_y * int(box[0]) + trans_y
-        pred['right'] = scale_fatcor_x * int(box[3])
-        pred['bottom'] = scale_fatcor_y * int(box[2]) + trans_y
+        left_for_display = scale_fatcor_x * int(box[1])
+        top_for_display = scale_fatcor_y * int(box[0]) + trans_y
+        right_for_display = scale_fatcor_x * int(box[3])
+        bottom_for_display = scale_fatcor_y * int(box[2]) + trans_y
 
         # calculate temperature
         # option 1 - median temperature of forehead
@@ -780,8 +784,15 @@ class RetinaFace:
         temp = np.round(temp, 1)
 
         # save face boxes and temperatures
-        faces_list.append(box)
+        left_list.append(left_for_display)
+        top_list.append(top_for_display)
+        right_list.append(right_for_display)
+        bottom_list.append(bottom_for_display)
         temp_list.append(temp)
+
+        # for face tracking
+        faces_list.append(np.array([left, top, right, bottom]))
+
 
     # ----------------------
     # temperature statistics
@@ -796,8 +807,17 @@ class RetinaFace:
 
         # initialize temp_th
         if not self.temp_hist.is_initialized and (self.temp_hist.buffer.getNumOfElementsToRead() > self.temp_hist.N_samples_for_first_temp_th):
-            self.temp_hist.temp_th = self.temp_hist.calculate_temperature_threshold(time_current=time_stamp, hist_calc_interval=self.temp_hist.hist_calc_interval, display=False)
+            temp_th_hist = self.temp_hist.calculate_temperature_threshold(time_current=time_stamp, hist_calc_interval=self.temp_hist.hist_calc_interval, display=False)
             self.temp_hist.start_time = time_stamp  # FIXME: should be initialized when first value enters histogram
+
+
+            if self.temp_hist.use_temperature_statistics:
+
+                # calculate dc offset
+                self.temp_hist.dc_offset, temp_after_offset, temp_estimation, temp_probability \
+                    = self.temp_hist.calculate_temp_statistic(temp, time_current=time_stamp,
+                                                              hist_calc_interval=self.temp_hist.hist_calc_interval)
+
 
         # calculate temperature histogram
         if self.temp_hist.is_initialized and (np.mod(time_stamp - self.temp_hist.start_time, self.temp_hist.hist_calc_every_N_sec) == 0) and (time_stamp - self.temp_hist.start_time > 0):
@@ -816,22 +836,41 @@ class RetinaFace:
                 num_elements_in_time_interval = self.temp_hist.num_elements_in_time_interval(time_interval)
 
             if num_elements_in_time_interval > self.temp_hist.min_N_samples_for_temp_th:
-                self.temp_hist.temp_th = self.temp_hist.calculate_temperature_threshold(time_current=time_stamp, hist_calc_interval=self.temp_hist.hist_calc_interval, display=False)
+
+                temp_th_hist = self.temp_hist.calculate_temperature_threshold(time_current=time_stamp, hist_calc_interval=self.temp_hist.hist_calc_interval, display=False)
+
+                if self.temp_hist.use_temperature_statistics:
+                    self.temp_hist.dc_offset, temp_after_offset, temp_estimation, temp_probability \
+                        = self.temp_hist.calculate_temp_statistic(temp, time_current=time_stamp,
+                                                                  hist_calc_interval=self.temp_hist.hist_calc_interval)
             else:
-                self.temp_hist.temp_th_nominal
+                temp_th_hist = self.temp_hist.temp_th_nominal
 
-
-    # estimate true temperature
+    # compensate temperatures using dc
     if self.temp_hist.use_temperature_statistics:
-        dc_offset, temp_after_offset, temp_estimation, temp_probability \
-            = self.temp_hist.calculate_temp_statistic(temp, time_current=time_stamp, hist_calc_interval=self.temp_hist.hist_calc_interval)
+        temp_list = [temp - self.temp_hist.dc_offset for temp in temp_list]
+        self.temp_hist.temp_th = self.temp_hist.temp_th_when_using_dc_offset
+    else:
+        self.temp_hist.temp_th = temp_th_hist
 
-    # ----------------------
+   # ----------------------
 
+    # calculate output
+    output_list = []
+    for n in range(len(faces_list)):
 
-    # caclualte output
+        output_dict = {}
 
-    return faces_list
+        output_dict['left'] = left_list[n]
+        output_dict['top'] = top_list[n]
+        output_dict['right'] = right_list[n]
+        output_dict['bottom'] = bottom_list[n]
+        output_dict['temp'] = temp_list[n]
+        output_dict['threshold'] = self.temp_hist.temp_th
+
+        output_list.append(output_dict)
+
+    return output_list
 
 
   def detect_center(self, img, threshold=0.5, scales=[1.0], do_flip=False):
