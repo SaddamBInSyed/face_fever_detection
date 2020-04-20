@@ -9,7 +9,8 @@ from retinaface import RetinaFace
 import time
 
 thresh = 0.8
-# scales = [1024, 1980]
+scales = [1.0]
+flip = False
 
 count = 1
 gpuid = -1
@@ -33,23 +34,6 @@ for j, img_name in enumerate(test_dataset_list):
   image_path = os.path.join(test_dataset, img_name)
   img = cv2.imread(image_path)
   print(img.shape)
-
-  scales = [288, 384]
-  im_shape = img.shape
-  target_size = scales[0]
-  max_size = scales[1]
-  im_size_min = np.min(im_shape[0:2])
-  im_size_max = np.max(im_shape[0:2])
-  im_scale = float(target_size) / float(im_size_min)
-
-  # prevent bigger axis from being more than max_size:
-  if np.round(im_scale * im_size_max) > max_size:
-      im_scale = float(max_size) / float(im_size_max)
-
-  print('im_scale', im_scale)
-
-  scales = [1.0]
-  flip = False
 
   # detect faces
   for c in range(count):
