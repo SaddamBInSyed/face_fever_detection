@@ -734,14 +734,15 @@ class RetinaFace:
 
     if rotate90:
         # rotate image by 90 degrees
-        M = transformations.calculate_affine_matrix(rotation_angle=-90, rotation_center=(0, 0), translation=(0, 0), scale=1)
-        img, Mc = transformations.warp_affine_without_crop(copy.deepcopy(img).astype(np.float32), M)
+        # M = transformations.calculate_affine_matrix(rotation_angle=-90, rotation_center=(0, 0), translation=(0, 0), scale=1)
+        # img, Mc = transformations.warp_affine_without_crop(copy.deepcopy(img).astype(np.float32), M)
         # print(M)
+        # Mc_inv = transformations.cal_affine_matrix_inverse(Mc)
 
         # alternative rotation:
-        # rgb = np.fliplr(rgb.transpose())
-
-        Mc_inv = transformations.cal_affine_matrix_inverse(Mc)
+        inv_rot_mat = np.array([[0, 1], [-1, 0]])
+        shift_vect = np.array([[0], [img.shape[0] - 1]])
+        img = np.fliplr(img.transpose())
 
     rgb = copy.deepcopy(img)
 
@@ -794,7 +795,9 @@ class RetinaFace:
 
         if rotate90:
             # warp box points (undo 90 degrees rotations)
-            box = transformations.warp_points(box, Mc_inv).flatten()
+            # box = transformations.warp_points(box, Mc_inv).flatten()
+            box = (inv_rot_mat.dot(box.transpose()) + shift_vect).transpose().flatten()
+
 
         # scale box for display
         scale_fatcor_x = 2.46  # 16.3/6
@@ -844,7 +847,7 @@ class RetinaFace:
             if self.temp_hist.use_temperature_statistics:
 
                 # calculate dc offset
-                self.temp_hist.dc_offset, temp_after_offset, temp_estimation, temp_probability \
+                self.temp_hist.dc_offset, measure_mu_sigma \
                     = self.temp_hist.calculate_temp_statistic(temp, time_current=time_stamp,
                                                               hist_calc_interval=self.temp_hist.hist_calc_interval)
 
@@ -869,7 +872,7 @@ class RetinaFace:
                 temp_th_hist = self.temp_hist.calculate_temperature_threshold(time_current=time_stamp, hist_calc_interval=self.temp_hist.hist_calc_interval, display=False)
 
                 if self.temp_hist.use_temperature_statistics:
-                    self.temp_hist.dc_offset, temp_after_offset, temp_estimation, temp_probability \
+                    self.temp_hist.dc_offset, measure_mu_sigma\
                         = self.temp_hist.calculate_temp_statistic(temp, time_current=time_stamp,
                                                                   hist_calc_interval=self.temp_hist.hist_calc_interval)
         else:
@@ -880,7 +883,7 @@ class RetinaFace:
 
     # compensate temperatures using dc
     if self.temp_hist.use_temperature_statistics:
-        temp_list = [temp - self.temp_hist.dc_offset for temp in temp_list]
+        temp_list = [self.temp_hist.estimate_temp(temp, self.temp_hist.dc_offset, measure_mu_sigma=None) for temp in temp_list]
         self.temp_hist.temp_th = self.temp_hist.temp_th_when_using_dc_offset
     else:
         self.temp_hist.temp_th = temp_th_hist

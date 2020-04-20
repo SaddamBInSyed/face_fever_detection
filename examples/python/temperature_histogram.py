@@ -306,42 +306,26 @@ class TemperatureHistogram(object):
 
         # get temperature values of wanted time interval
         temp_vec = temp_vec_all[ind]
+
+        # calc DC offset using temp measurements
         dcMaxLike, dcMeanLike = self.find_DC.findDC(temp_vec)
         offset = dcMaxLike
-        temp_after_offset = []
-        temp_est = []
-        temp_prob = []
 
+        # calculating measurements statistic
         measure_mean = np.mean(temp_vec)
         measure_std = np.std(temp_vec)
-
-        temp_after_offset = curr_measure - offset
-
-        epsilon = 0.02
-        mu_prior = 36.77
-        mu_measure = temp_after_offset
-        sigma_prior = 0.6
-        sigma_measure = 0.4
-
         measure_mu_sigma = (measure_mean, measure_std)
 
-        joined_mu = (mu_prior * sigma_measure ** 2 + mu_measure * sigma_prior ** 2) / (sigma_prior ** 2 + sigma_measure ** 2)
-        joined_sigma = np.sqrt(sigma_prior ** 2 * sigma_measure ** 2 / (sigma_prior ** 2 + sigma_measure ** 2))
-
-        temp_est = joined_mu
-
-        # if temp_prob == 0:
-        #     temp_est = temp_after_offset
-
-        # return offset, temp_after_offset, temp_est, temp_prob
         return offset, measure_mu_sigma
 
     def estimate_temp(self, curr_temp_measure, offset, measure_mu_sigma):
+
         mu_prior = self.prior_mu_sigma[0]
         sigma_prior = self.prior_mu_sigma[1]
         mu_measure = curr_temp_measure - offset
         sigma_measure_given_temp = self.sigma_measure_given_temp
 
+        # calculating mean and std of joined distribution (the mean is the estimated temperature)
         joined_mu = (mu_prior * sigma_measure_given_temp ** 2 + mu_measure * sigma_prior ** 2) / (sigma_prior ** 2 + sigma_measure_given_temp ** 2)
         joined_sigma = np.sqrt(sigma_prior ** 2 * sigma_measure_given_temp ** 2 / (sigma_prior ** 2 + sigma_measure_given_temp ** 2))
 
