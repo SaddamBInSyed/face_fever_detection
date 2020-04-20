@@ -935,7 +935,7 @@ class RetinaFace:
     existing_faces_flags = np.isin(np.arange(len(temp_list)), indices_faces_existing_ids)
 
     if len(id_faces) == 0:
-        id_faces = [-1 for t in temp_list] # generate fake ids
+        id_faces = [0 for t in temp_list] # generate fake ids
 
     color_new = (0, 255, 0)
     color_exist = (0, 0, 255)
