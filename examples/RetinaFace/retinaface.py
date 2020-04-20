@@ -1,11 +1,8 @@
-from __future__ import print_function
+from __future__ import print_function, division
 import sys
 import os
 import datetime
 import time
-import tensorrt as trt
-import pycuda.autoinit
-import pycuda.driver as cuda
 import numpy as np
 import cv2
 #from rcnn import config
@@ -15,6 +12,10 @@ from rcnn.processing.bbox_transform import clip_boxes
 from rcnn.processing.generate_anchor import generate_anchors_fpn, anchors_plane
 from rcnn.processing.nms import gpu_nms_wrapper, cpu_nms_wrapper
 from rcnn.processing.bbox_transform import bbox_overlaps
+
+sys.path.insert(0, '.')
+import examples.python.transformations as transformations
+from examples.python.temperature_histogram import TemperatureHistogram
 
 # WITH_RESHAPE_SOFTMAX
 OUTPUT_LAYERS  =['face_rpn_cls_score_stride32', 'face_rpn_bbox_pred_stride32', 'face_rpn_landmark_pred_stride32',
@@ -94,11 +95,77 @@ def trt_alloc_buf(engine):
     return inputs, outputs, bindings, stream
 
 
+FACE_DETECTION_THRESH=0.2
+FACE_TEMP_PRECENTILE = [0.9, 1.0]
+
+l_ratio = 0.25
+r_ratio = 0.75
+t_ratio = 0.1
+b_ratio = 0.3
+
+def calc_precentile(x, q_min=0.92, q_max=0.99):
+
+    x_sorterd = np.sort(x.flatten())
+
+    N = len(x_sorterd) - 1
+
+    ind_min = int(np.floor(q_min * N))
+    ind_max = int(np.floor(q_max * N))
+
+    if ind_min < ind_max:
+        y = np.mean(x_sorterd[ind_min:ind_max])
+    else:
+        y = x_sorterd[ind_max]
+
+    return y
+
+
+def calc_temp_median_of_rect(img, box):
+
+    # for temparture calculation - use raw image
+    top = int(box[1])
+    left = int(box[0])
+    bottom = int(box[3])
+    right = int(box[2])
+
+    w = box[2] - box[0]
+    h = box[3] - box[1]
+    hor_start = int(left + l_ratio * w)
+    hor_end = int(left + r_ratio * w)
+    ver_start = int(top + t_ratio * h)
+    ver_end = int(top + b_ratio * h)
+
+    temp_raw = np.median(img[ver_start:ver_end, hor_start:hor_end])
+    forehead_bb = [hor_start, ver_start, hor_end, ver_end]
+    return temp_raw, forehead_bb
+
+
+def calc_temp_precentile(img, box):
+
+    top = int(box[1])
+    left = int(box[0])
+    bottom = int(box[3])
+    right = int(box[2])
+
+    hor_start = int(left)
+    hor_end = int(right)
+    ver_start = int(top)
+    ver_end = int(bottom)
+
+    temp_raw = calc_precentile(img[ver_start:ver_end, hor_start:hor_end], q_min=FACE_TEMP_PRECENTILE[0],
+                               q_max=FACE_TEMP_PRECENTILE[1])
+    return temp_raw
+
+
+
 class RetinaFace:
 
-  def __init__(self, prefix, TRT_engine_path= '../RetinaFace/models/R50_SOFTMAX.engine',
+  def __init__(self, model_path= '../RetinaFace/models/R50_SOFTMAX.engine', use_TRT=False,
                epoch=0, ctx_id=0, network='net3', nms=0.4,
-               nocrop=False, decay4 = 0.5, vote=False, use_TRT=False, image_size = (384, 288)):
+               nocrop=False, decay4 = 0.5, vote=False, image_size = (384, 288)):
+
+    self.temp_hist = TemperatureHistogram()
+
     self.ctx_id = ctx_id
     self.network = network
     self.decay4 = decay4
@@ -109,10 +176,8 @@ class RetinaFace:
     self.fpn_keys = []
     self.anchor_cfg = None
     self.image_size_wh = image_size
+    self.mxmodel=None
     self.use_TRT = use_TRT
-    self.TRT_engine_path =TRT_engine_path
-    self.TRT_init_ok = False
-    self.TRT_LOGGER = trt.Logger(trt.Logger.VERBOSE) if self.debug else trt.Logger()
 
     pixel_means=[0.0, 0.0, 0.0]
     pixel_stds=[1.0, 1.0, 1.0]
@@ -230,8 +295,39 @@ class RetinaFace:
     self.bbox_stds = [1.0, 1.0, 1.0, 1.0]
     self.landmark_std = 1.0
 
-    self.init_trt()
-    self.output_shapes = convert_output_shape(w=self.image_size_wh[0], h=self.image_size_wh[1])
+
+    if self.use_TRT:
+        global trt
+        global cuda_autoinit
+        global cuda
+
+        import tensorrt as trt
+        import pycuda.autoinit as cuda_autoinit
+        import pycuda.driver as cuda
+        self.TRT_engine_path = model_path
+        self.TRT_init_ok = False
+        self.TRT_LOGGER = trt.Logger(trt.Logger.VERBOSE) if self.debug else trt.Logger()
+        self.init_trt()
+        self.forward = self.forward_trt
+        self.output_shapes = convert_output_shape(w=self.image_size_wh[0], h=self.image_size_wh[1])
+
+    else:
+        global mx
+        global  nd
+        import mxnet as mx
+        from mxnet import ndarray as nd
+
+        if self.ctx_id >= 0:
+            self.ctx = mx.gpu(self.ctx_id)
+        else:
+            self.ctx = mx.cpu()
+        sym, arg_params, aux_params = mx.model.load_checkpoint(model_path, epoch)
+        self.mxmodel = mx.mod.Module(symbol=sym, context=self.ctx, label_names = None)
+        self.mxmodel.bind(data_shapes=[('data', (1, 3, self.image_size_wh[0], self.image_size_wh[1]))], for_training=False)
+        self.mxmodel.set_params(arg_params, aux_params)
+
+        self.forward =self.forward_mxnet
+
 
 
 
@@ -244,6 +340,28 @@ class RetinaFace:
     data = nd.array(im_tensor)
     return data
 
+
+  def forward_mxnet(self,im_tensor):
+        data = nd.array(im_tensor)
+        db = mx.io.DataBatch(data=(data,), provide_data=[('data', data.shape)])
+        self.mxmodel.forward(db, is_train=False)
+        net_out = self.mxmodel.get_outputs()
+
+        return net_out
+
+
+  def init_mxnet(self):
+
+      if self.ctx_id >= 0:
+          self.ctx = mx.gpu(self.ctx_id)
+      else:
+          self.ctx = mx.cpu()
+      sym, arg_params, aux_params = mx.model.load_checkpoint(prefix, epoch)
+      self.model = mx.mod.Module(symbol=sym, context=self.ctx, label_names=None)
+      self.model.bind(data_shapes=[('data', (1, 3, self.image_size_wh[0], self.image_size_wh[1]))],
+                      for_training=False)
+      self.model.set_params(arg_params, aux_params)
+
   def convert_trt_output_shape(self,trt_outputs ):
 
       trt_outputs = [output.reshape(shape) for output, shape
@@ -251,21 +369,21 @@ class RetinaFace:
 
       return trt_outputs
 
-  def _load_engine(self):
+  def _load_engine(self,TRT_engine_path ):
 
-        if not os.path.exists(self.TRT_engine_path):
+        if not os.path.exists(TRT_engine_path):
             return None
 
-        with open(self.TRT_engine_path, 'rb') as f, trt.Runtime(self.TRT_LOGGER) as runtime:
+        with open(TRT_engine_path, 'rb') as f, trt.Runtime(self.TRT_LOGGER) as runtime:
             return runtime.deserialize_cuda_engine(f.read())
 
 
   def _create_context(self):
         return self.engine.create_execution_context()
 
-  def init_trt(self):
+  def init_trt(self,TRT_engine_path):
 
-        self.engine = self._load_engine()
+        self.engine = self._load_engine(TRT_engine_path)
 
         if not self.engine:
             self.TRT_init_ok = False
@@ -358,12 +476,12 @@ class RetinaFace:
 
           if self.debug:
               timea = datetime.datetime.now()
-              net_out = self.forward(im_tensor, is_train=False)
+              net_out = self.forward(im_tensor)
               timeb = datetime.datetime.now()
               diff = timeb - timea
               print('RetinaFace forward', diff.total_seconds(), 'seconds')
           else:
-              net_out = self.forward(im_tensor, is_train=False)
+              net_out = self.forward(im_tensor)
 
           #post_nms_topN = self._rpn_post_nms_top_n
           #min_size_dict = self._rpn_min_size_fpn
@@ -381,7 +499,7 @@ class RetinaFace:
               #if self.vote and stride==4 and len(scales)>2 and (im_scale==scales[0]):
               #  continue
               #print('getting', im_scale, stride, idx, len(net_out), data.shape, file=sys.stderr)
-              scores = net_out[sym_idx]
+              scores = net_out[sym_idx].asnumpy()
               if self.debug:
                 timeb = datetime.datetime.now()
                 diff = timeb - timea
@@ -390,7 +508,7 @@ class RetinaFace:
               #print('scores',stride, scores.shape, file=sys.stderr)
               scores = scores[:, self._num_anchors['stride%s'%s]:, :, :]
 
-              bbox_deltas = net_out[sym_idx+1]
+              bbox_deltas = net_out[sym_idx+1].asnumpy()
 
               #if DEBUG:
               #    print 'im_size: ({}, {})'.format(im_info[0], im_info[1])
@@ -427,6 +545,7 @@ class RetinaFace:
               bbox_deltas[:, 1::4] = bbox_deltas[:,1::4] * self.bbox_stds[1]
               bbox_deltas[:, 2::4] = bbox_deltas[:,2::4] * self.bbox_stds[2]
               bbox_deltas[:, 3::4] = bbox_deltas[:,3::4] * self.bbox_stds[3]
+              bbox_deltas=bbox_deltas
               proposals = self.bbox_pred(anchors, bbox_deltas)
 
 
@@ -441,7 +560,7 @@ class RetinaFace:
                 for diff_idx in __idx:
                   if sym_idx+diff_idx>=len(net_out):
                     break
-                  body = net_out[sym_idx+diff_idx]
+                  body = net_out[sym_idx+diff_idx].asnumpy()
                   if body.shape[1]//A==2: #cls branch
                     if cls_cascade or bbox_cascade:
                       break
@@ -509,7 +628,7 @@ class RetinaFace:
                 strides_list.append(_strides)
 
               if not self.vote and self.use_landmarks:
-                landmark_deltas = net_out[sym_idx+2]
+                landmark_deltas = net_out[sym_idx+2].asnumpy()
                 #landmark_deltas = self._clip_pad(landmark_deltas, (height, width))
                 landmark_pred_len = landmark_deltas.shape[1]//A
                 landmark_deltas = landmark_deltas.transpose((0, 2, 3, 1)).reshape((-1, 5, landmark_pred_len//5))
@@ -594,12 +713,165 @@ class RetinaFace:
     else:
       det = np.hstack((proposals[:,0:4], scores)).astype(np.float32, copy=False)
 
-
     if self.debug:
       timeb = datetime.datetime.now()
       diff = timeb - timea
       print('C uses', diff.total_seconds(), 'seconds')
     return det, landmarks
+
+
+  def detect_and_track_faces(self, img, threshold=0.5, scales=[1.0], do_flip=False, verobse=True):
+
+    # rotate image by 90 degrees
+    M = transformations.calculate_affine_matrix(rotation_angle=-90, rotation_center=(0, 0), translation=(0, 0), scale=1)
+    rgb, Mc = transformations.warp_affine_without_crop(img.astype(np.float32), M)
+    # print(M)
+    Mc_inv = transformations.cal_affine_matrix_inverse(Mc)
+
+    # generate 3 channels image
+    rgb = cv2.merge((rgb, rgb, rgb))
+    # im_raw = rgb.copy()
+
+    # convert image to unit8 with range of [0, 255]
+    rgb = rgb - rgb.min()
+    rgb = rgb.astype(np.float32)
+    rgb = (rgb / (rgb.max()) * 255).astype(np.uint8)
+    # cv2.imwrite('after_trn_temp.png',rgb)
+
+    # detect faces
+    faces, landmarks = self.detect(rgb, FACE_DETECTION_THRESH, scales=[1.0], do_flip=False)
+
+    num_predictions = len(faces) if faces is not None else 0
+    if verobse:
+        print('Num of faces {}'.format(num_predictions))
+
+    left_list = []
+    top_list = []
+    right_list = []
+    bottom_list = []
+    faces_list = []
+    temp_list = []
+
+    for i in range(num_predictions):
+        pred = {}
+
+        box = faces[i]
+        left = box[0]
+        top = box[1]
+        right = box[2]
+        bottom = box[3]
+        box = np.array([[left, top], [right, bottom]])
+
+        # warp box points (undo 90 degrees rotations)
+        box = transformations.warp_points(box, Mc_inv).flatten()
+
+        # scale box for display
+        scale_fatcor_x = 2.46  # 16.3/6
+        scale_fatcor_y = 25.5 / 28.2
+        trans_y = - 0
+
+        left_for_display = scale_fatcor_x * int(box[1])
+        top_for_display = scale_fatcor_y * int(box[0]) + trans_y
+        right_for_display = scale_fatcor_x * int(box[3])
+        bottom_for_display = scale_fatcor_y * int(box[2]) + trans_y
+
+        # calculate temperature
+        # option 1 - median temperature of forehead
+        # temp, forehead = calc_temp_median_of_rect(img, faces[i])
+
+        # option 2 - calculate temperature using percentiles
+        temp = calc_temp_precentile(img, faces[i])
+        temp = np.round(temp, 1)
+
+        # save face boxes and temperatures
+        left_list.append(left_for_display)
+        top_list.append(top_for_display)
+        right_list.append(right_for_display)
+        bottom_list.append(bottom_for_display)
+        temp_list.append(temp)
+
+        # for face tracking
+        faces_list.append(np.array([left, top, right, bottom]))
+
+
+    # ----------------------
+    # temperature statistics
+    # ----------------------
+
+    # track faces
+    time_stamp = time.time()
+    if self.temp_hist.use_temperature_histogram:
+
+        # track faces and update temperature histogram
+        self.temp_hist.update_faces_temperature(faces_list, temp_list, time_stamp)
+
+        # initialize temp_th
+        if not self.temp_hist.is_initialized and (self.temp_hist.buffer.getNumOfElementsToRead() > self.temp_hist.N_samples_for_first_temp_th):
+            temp_th_hist = self.temp_hist.calculate_temperature_threshold(time_current=time_stamp, hist_calc_interval=self.temp_hist.hist_calc_interval, display=False)
+            self.temp_hist.start_time = time_stamp  # FIXME: should be initialized when first value enters histogram
+
+
+            if self.temp_hist.use_temperature_statistics:
+
+                # calculate dc offset
+                self.temp_hist.dc_offset, temp_after_offset, temp_estimation, temp_probability \
+                    = self.temp_hist.calculate_temp_statistic(temp, time_current=time_stamp,
+                                                              hist_calc_interval=self.temp_hist.hist_calc_interval)
+
+
+        # calculate temperature histogram
+        if self.temp_hist.is_initialized and (np.mod(time_stamp - self.temp_hist.start_time, self.temp_hist.hist_calc_every_N_sec) == 0) and (time_stamp - self.temp_hist.start_time > 0):
+
+            # calculate number of elements to read
+            time_interval = self.temp_hist.hist_calc_interval
+            num_elements_in_time_interval = self.temp_hist.num_elements_in_time_interval(time_interval)
+
+            # if number of elements is small - multiply time interval (up to 4 times)
+            if num_elements_in_time_interval < self.temp_hist.N_samples_for_temp_th:
+                time_interval *= 2
+                num_elements_in_time_interval = self.temp_hist.num_elements_in_time_interval(time_interval)
+
+            if num_elements_in_time_interval < self.temp_hist.N_samples_for_temp_th:
+                time_interval *= 2
+                num_elements_in_time_interval = self.temp_hist.num_elements_in_time_interval(time_interval)
+
+            if num_elements_in_time_interval > self.temp_hist.min_N_samples_for_temp_th:
+
+                temp_th_hist = self.temp_hist.calculate_temperature_threshold(time_current=time_stamp, hist_calc_interval=self.temp_hist.hist_calc_interval, display=False)
+
+                if self.temp_hist.use_temperature_statistics:
+                    self.temp_hist.dc_offset, temp_after_offset, temp_estimation, temp_probability \
+                        = self.temp_hist.calculate_temp_statistic(temp, time_current=time_stamp,
+                                                                  hist_calc_interval=self.temp_hist.hist_calc_interval)
+            else:
+                temp_th_hist = self.temp_hist.temp_th_nominal
+
+    # compensate temperatures using dc
+    if self.temp_hist.use_temperature_statistics:
+        temp_list = [temp - self.temp_hist.dc_offset for temp in temp_list]
+        self.temp_hist.temp_th = self.temp_hist.temp_th_when_using_dc_offset
+    else:
+        self.temp_hist.temp_th = temp_th_hist
+
+   # ----------------------
+
+    # calculate output
+    output_list = []
+    for n in range(len(faces_list)):
+
+        output_dict = {}
+
+        output_dict['left'] = left_list[n]
+        output_dict['top'] = top_list[n]
+        output_dict['right'] = right_list[n]
+        output_dict['bottom'] = bottom_list[n]
+        output_dict['temp'] = temp_list[n]
+        output_dict['threshold'] = self.temp_hist.temp_th
+
+        output_list.append(output_dict)
+
+    return output_list
+
 
   def detect_center(self, img, threshold=0.5, scales=[1.0], do_flip=False):
     det, landmarks = self.detect(img, threshold, scales, do_flip)
@@ -616,6 +888,7 @@ class RetinaFace:
     bbox = det[bindex,:]
     landmark = landmarks[bindex, :, :]
     return bbox, landmark
+
 
   @staticmethod
   def check_large_pose(landmark, bbox):
