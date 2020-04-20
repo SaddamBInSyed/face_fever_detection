@@ -189,7 +189,7 @@ class TemperatureHistogram(object):
                  hist_calc_interval=30 * 60, # [sec]
                  buffer_max_len=120*60*1,  # [minutes * sec * persons_per_sec]
                  hist_percentile=0.85,  # [%]
-                 N_samples_for_temp_th=50,
+                 N_samples_for_temp_th=30,
                  N_samples_for_first_temp_th=20,
                  temp_th_nominal=34.0,
                  temp_th_min=30.0,
@@ -208,6 +208,7 @@ class TemperatureHistogram(object):
         self.temp_th_max = temp_th_max
         self.is_initialized = False  # True after first temp_th calculation
         self.start_time = time.time()
+        self.last_time_th_calculated = -1
 
         # Initialize Cyclic Buffer
         self.shape_element = (3,)  #  each buffer element is comprised of ndarray of [time, temp, id]
@@ -367,6 +368,8 @@ class TemperatureHistogram(object):
         temp_th = np.round(temp_th, 1)
 
         self.temp_th = temp_th
+
+        self.last_time_th_calculated = time_current
 
         if not self.is_initialized:
             self.is_initialized = True

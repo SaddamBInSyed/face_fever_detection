@@ -804,10 +804,10 @@ class RetinaFace:
         scale_fatcor_y = 25.5 / 28.2
         trans_y = - 0
 
-        left_for_display = scale_fatcor_x * int(left)
-        top_for_display = scale_fatcor_y * int(top) + trans_y
-        right_for_display = scale_fatcor_x * int(right)
-        bottom_for_display = scale_fatcor_y * int(bottom) + trans_y
+        left_for_display = scale_fatcor_x * int(box[0])
+        top_for_display = scale_fatcor_y * int(box[1]) + trans_y
+        right_for_display = scale_fatcor_x * int(box[2])
+        bottom_for_display = scale_fatcor_y * int(box[3]) + trans_y
 
         # calculate temperature
         # option 1 - median temperature of forehead
@@ -840,7 +840,7 @@ class RetinaFace:
 
         # initialize temp_th
         if not self.temp_hist.is_initialized and (self.temp_hist.buffer.getNumOfElementsToRead() > self.temp_hist.N_samples_for_first_temp_th):
-            temp_th_hist = self.temp_hist.calculate_temperature_threshold(time_current=time_stamp, hist_calc_interval=self.temp_hist.hist_calc_interval, display=False)
+            temp_th_hist = self.temp_hist.calculate_temperature_threshold(time_current=time_stamp, hist_calc_interval=self.temp_hist.hist_calc_interval, display=display)
             self.temp_hist.start_time = time_stamp  # FIXME: should be initialized when first value enters histogram
 
 
@@ -851,11 +851,17 @@ class RetinaFace:
                     = self.temp_hist.calculate_temp_statistic(time_current=time_stamp, hist_calc_interval=self.temp_hist.hist_calc_interval)
 
         # calculate temperature histogram
-        if self.temp_hist.is_initialized and (np.mod(time_stamp - self.temp_hist.start_time, self.temp_hist.hist_calc_every_N_sec) == 0) and (time_stamp - self.temp_hist.start_time > 0):
+
+        time_interval_from_last_temp_th_calc = time_stamp - self.temp_hist.last_time_th_calculated
+        is_time_interval_passed = (time_interval_from_last_temp_th_calc > self.temp_hist.hist_calc_interval) and (time_stamp - self.temp_hist.start_time > 0)
+        num_of_temp_samples_from_last_temp_th_calc = self.temp_hist.num_elements_in_time_interval(time_stamp, time_interval_from_last_temp_th_calc)
+        is_N_faces_detected_from_last_interval = num_of_temp_samples_from_last_temp_th_calc > self.temp_hist.N_samples_for_temp_th
+
+        if self.temp_hist.is_initialized and (is_time_interval_passed or is_N_faces_detected_from_last_interval):
 
             # calculate number of elements to read
             time_interval = self.temp_hist.hist_calc_interval
-            num_elements_in_time_interval = self.temp_hist.num_elements_in_time_interval(time_interval)
+            num_elements_in_time_interval = self.temp_hist.num_elements_in_time_interval(time_stamp, time_interval)
 
             # if number of elements is small - multiply time interval (up to 4 times)
             if num_elements_in_time_interval < self.temp_hist.N_samples_for_temp_th:
@@ -868,7 +874,7 @@ class RetinaFace:
 
             if num_elements_in_time_interval > self.temp_hist.min_N_samples_for_temp_th:
 
-                temp_th_hist = self.temp_hist.calculate_temperature_threshold(time_current=time_stamp, hist_calc_interval=self.temp_hist.hist_calc_interval, display=False)
+                temp_th_hist = self.temp_hist.calculate_temperature_threshold(time_current=time_stamp, hist_calc_interval=self.temp_hist.hist_calc_interval, display=display)
 
                 if self.temp_hist.use_temperature_statistics:
                     self.temp_hist.dc_offset, measure_mu_sigma\
