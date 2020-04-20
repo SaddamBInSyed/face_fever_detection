@@ -193,7 +193,7 @@ def predict():
 
         # detect and track faces
         image_for_face_detection = temperatures_image_for_human
-        output_list = detector.detect_and_track_faces(image_for_face_detection, FACE_DETECTION_THRESH, scales=[1.0], do_flip=False)
+        output_list = detector.detect_and_track_faces(image_for_face_detection, FACE_DETECTION_THRESH, scales=[1.0], do_flip=False)[0]
 
         # update response
         response["id"] = id
