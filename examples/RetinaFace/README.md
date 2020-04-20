@@ -31,9 +31,32 @@ RetinaFace is a practical single-stage [SOTA](http://shuoyang1213.me/WIDERFACE/W
 
 ## Install
 
+### gpu
+
 1. Install MXNet with GPU support.
 2. Install Deformable Convolution V2 operator from [Deformable-ConvNets](https://github.com/msracver/Deformable-ConvNets) if you use the DCN based backbone.
 3. Type ``make`` to build cxx tools.
+
+### cpu
+Tested using python 3.6.
+
+1. install cpu_req.txt: 
+```
+cd examples/RetinaFace
+pip install -r req_cpu.txt
+```
+2. install python 3.6 dev
+`sudo apt install python3.6-dev`
+3. build Cython
+`make`
+4. install rcnn
+```
+cd rcnn/cython
+pip install . 
+```
+5. download pre-trained model from [here](https://www.dropbox.com/s/53ftnlarhyrpkg2/retinaface-R50.zip?dl=0) to examples/RetinaFace/models
+6. download example images from [here](https://drive.google.com/drive/folders/13S4h4PgdZ7VCTAYicdR1E3ltxhm0dvED?usp=sharing) to examples/RetinaFace/images
+7. run examples/RetinaFace/test.py
 
 ## Training
 

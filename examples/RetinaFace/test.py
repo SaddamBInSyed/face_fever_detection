@@ -9,30 +9,39 @@ from retinaface import RetinaFace
 import time
 
 thresh = 0.8
-scales = [1024, 1980]
+# scales = [1024, 1980]
 
 count = 1
 gpuid = -1
-detector = RetinaFace(model_path='./models/R50',use_TRT=False, epoch=0,ctx_id=gpuid, network= 'net3')
-test_dataset = '/home/origan/pony/ir_images/2020_30_03__11_09_03/png_im/'
-    # with open(testset_list, 'r') as fr:
-    #     test_dataset = fr.read().split()
-num_images = len(os.listdir(test_dataset))
-test_dataset_list = os.listdir(test_dataset)
-for j, img_name in enumerate(test_dataset_list):
-  scales = [288, 384]
 
-  image_path = test_dataset + img_name
+# initialize detector
+detector = RetinaFace(model_path='./models/R50',use_TRT=False, epoch=0,ctx_id=gpuid, network= 'net3')
+
+# set input and output dirs
+test_dataset = os.path.join(os.path.dirname(__file__), 'images')
+output_dir = os.path.join(os.path.dirname(__file__), 'images_out')
+os.makedirs(output_dir, exist_ok=True)
+
+# iterate over images and detect faces
+num_images = len(os.listdir(test_dataset))
+
+test_dataset_list = sorted(os.listdir(test_dataset))
+
+for j, img_name in enumerate(test_dataset_list):
+
+  # read image
+  image_path = os.path.join(test_dataset, img_name)
   img = cv2.imread(image_path)
   print(img.shape)
+
+  scales = [288, 384]
   im_shape = img.shape
   target_size = scales[0]
   max_size = scales[1]
   im_size_min = np.min(im_shape[0:2])
   im_size_max = np.max(im_shape[0:2])
-  #im_scale = 1.0
-  #if im_size_min>target_size or im_size_max>max_size:
   im_scale = float(target_size) / float(im_size_min)
+
   # prevent bigger axis from being more than max_size:
   if np.round(im_scale * im_size_max) > max_size:
       im_scale = float(max_size) / float(im_size_max)
@@ -42,12 +51,14 @@ for j, img_name in enumerate(test_dataset_list):
   scales = [1.0]
   flip = False
 
+  # detect faces
   for c in range(count):
     start_t=time.time()
     faces, landmarks = detector.detect(img, thresh, scales=scales, do_flip=flip)
     end_t = time.time()
     print(c, faces.shape, landmarks.shape, end_t-start_t)
 
+  # display
   if faces is not None and len(faces) >0 :
     print('find', faces.shape[0], 'faces')
     for i in range(faces.shape[0]):
@@ -65,7 +76,7 @@ for j, img_name in enumerate(test_dataset_list):
             color = (0,255,0)
           cv2.circle(img, (landmark5[l][0], landmark5[l][1]), 1, color, 2)
 
-    filename = './detector_test_{}.jpg'.format(j)
+    filename = os.path.join(output_dir, img_name)
     print('writing', filename)
     cv2.imwrite(filename, img)
 
