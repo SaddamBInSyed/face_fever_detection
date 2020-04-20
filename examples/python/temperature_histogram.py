@@ -207,7 +207,7 @@ class TemperatureHistogram(object):
         self.temp_th_min = temp_th_min
         self.temp_th_max = temp_th_max
         self.is_initialized = False  # True after first temp_th calculation
-        self.temp_hist.start_time = time.time()
+        self.start_time = time.time()
 
         # Initialize Cyclic Buffer
         self.shape_element = (3,)  #  each buffer element is comprised of ndarray of [time, temp, id]

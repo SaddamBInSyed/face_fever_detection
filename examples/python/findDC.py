@@ -1,4 +1,6 @@
+from __future__ import print_function, division
 import numpy as np
+
 class CFindDC():
 
     def __init__(self):
@@ -45,22 +47,22 @@ if __name__ == "__main__":
     tempVector = np.array([36.6,36,37, 36.5, 35.8,37.2, 37.5, 37.2, 40, 42,37,50]) + dc
     dcMaxLike,dcMeanLike = dcFinder.findDC(tempVector)
     simpleMedian = np.median(tempVector) - 37
-    print dcMaxLike,dcMeanLike,simpleMedian
+    print(dcMaxLike,dcMeanLike,simpleMedian)
 
     dc = -4.5  # must be no more than +-5
     tempVector = np.array([36.6, 36, 37, 36.5, 35.8, 37.2, 37.5, 37.2, 40, 42, 37, 50]) + dc
     dcMaxLike, dcMeanLike = dcFinder.findDC(tempVector)
     simpleMedian = np.median(tempVector) - 37
-    print dcMaxLike, dcMeanLike,simpleMedian
+    print(dcMaxLike, dcMeanLike,simpleMedian)
 
     dc = -4.5  # must be no more than +-5
     tempVector = np.array([36.6, 36, 37, 36.5, 35.8, 37.2, 40, 50]) + dc
     dcMaxLike, dcMeanLike = dcFinder.findDC(tempVector)
     simpleMedian = np.median(tempVector) - 37
-    print dcMaxLike, dcMeanLike, simpleMedian
+    print(dcMaxLike, dcMeanLike, simpleMedian)
 
     dc = 3  # must be no more than +-5
     tempVector = np.array([36.6, 37.2, 40, 42, 37, 50]) + dc
     dcMaxLike, dcMeanLike = dcFinder.findDC(tempVector)
     simpleMedian = np.median(tempVector) - 37
-    print dcMaxLike, dcMeanLike, simpleMedian
+    print(dcMaxLike, dcMeanLike, simpleMedian)
