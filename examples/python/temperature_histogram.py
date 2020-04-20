@@ -518,51 +518,55 @@ class TemperatureHistogram(object):
             Number of last buffer elements in which faces will be searched.
         """
 
-        # track faces ids
-        faces_array = np.stack(faces_list, axis=0)
-        id_faces, temp_mean = self.faces_tracker.giveFacesIds(faces_array, temp_list)
+        id_faces, indices_faces_existing_ids = None, None
 
-        # -------------------------
-        # update faces temperature
-        # -------------------------
+        if len(faces_list) > 0:
 
-        # read last N elements from buffer
-        if N == -1:
-            N = self.buffer.length
+            # track faces ids
+            faces_array = np.stack(faces_list, axis=0)
+            id_faces, temp_mean = self.faces_tracker.giveFacesIds(faces_array, temp_list)
 
-        # read data from buffer
-        time_vec, temp_vec, id_vec, N = self.read_N_elements(N)
+            # -------------------------
+            # update faces temperature
+            # -------------------------
 
-        # search for faces_id in buffer
-        indices_buffer_existing_ids, indices_faces_existing_ids = self.find_id_indices(id_vec, ids_to_search=id_faces)
+            # read last N elements from buffer
+            if N == -1:
+                N = self.buffer.length
 
-        # update temperatures and time of existing ids
-        for ind_buffer, ind_faces in zip(indices_buffer_existing_ids, indices_faces_existing_ids):
+            # read data from buffer
+            time_vec, temp_vec, id_vec, N = self.read_N_elements(N)
 
-            # get current temperature
-            temp_prev = temp_vec[ind_buffer]
+            # search for faces_id in buffer
+            indices_buffer_existing_ids, indices_faces_existing_ids = self.find_id_indices(id_vec, ids_to_search=id_faces)
 
-            # get new temperature
-            temp_new = temp_list[ind_faces]
+            # update temperatures and time of existing ids
+            for ind_buffer, ind_faces in zip(indices_buffer_existing_ids, indices_faces_existing_ids):
 
-            # calculate updated temperature and time
-            time_updated = time_stamp
-            temp_updated = temp_memory * temp_prev + (1 - temp_memory) * temp_new
+                # get current temperature
+                temp_prev = temp_vec[ind_buffer]
 
-            # update arrays
-            time_vec[ind_buffer] = time_updated
-            temp_vec[ind_buffer] = temp_updated
+                # get new temperature
+                temp_new = temp_list[ind_faces]
 
-        # rewrite updated arrays
-        self.rewrite_elements(time_vec, temp_vec, id_vec)
+                # calculate updated temperature and time
+                time_updated = time_stamp
+                temp_updated = temp_memory * temp_prev + (1 - temp_memory) * temp_new
 
-        # write new faces data
-        inds_new = np.setdiff1d(np.arange(len(faces_list)), indices_faces_existing_ids)
-        time_vec_new = np.ones_like(inds_new) * time_stamp
-        temp_vec_new = np.array(temp_list)[inds_new]
-        id_vec_new = id_faces[inds_new]
+                # update arrays
+                time_vec[ind_buffer] = time_updated
+                temp_vec[ind_buffer] = temp_updated
 
-        self.write_elements(time_vec_new, temp_vec_new, id_vec_new)
+            # rewrite updated arrays
+            self.rewrite_elements(time_vec, temp_vec, id_vec)
+
+            # write new faces data
+            inds_new = np.setdiff1d(np.arange(len(faces_list)), indices_faces_existing_ids)
+            time_vec_new = np.ones_like(inds_new) * time_stamp
+            temp_vec_new = np.array(temp_list)[inds_new]
+            id_vec_new = id_faces[inds_new]
+
+            self.write_elements(time_vec_new, temp_vec_new, id_vec_new)
 
         return id_faces, indices_faces_existing_ids
 

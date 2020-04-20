@@ -720,29 +720,36 @@ class RetinaFace:
     return det, landmarks
 
 
-  def detect_and_track_faces(self, img, threshold=0.5, scales=[1.0], do_flip=False, verobse=True):
+  def detect_and_track_faces(self, img, threshold=0.5, scales=[1.0], do_flip=False, verobse=True,
+                             rotate90=True, gray2rgb=True, scale_dynamic_range=True):
 
-    # rotate image by 90 degrees
-    M = transformations.calculate_affine_matrix(rotation_angle=-90, rotation_center=(0, 0), translation=(0, 0), scale=1)
-    rgb, Mc = transformations.warp_affine_without_crop(img.astype(np.float32), M)
-    # alternative rotation:
-    # rgb = np.fliplr(rgb.transpose())
+    if rotate90:
+        # rotate image by 90 degrees
+        M = transformations.calculate_affine_matrix(rotation_angle=-90, rotation_center=(0, 0), translation=(0, 0), scale=1)
+        rgb, Mc = transformations.warp_affine_without_crop(img.astype(np.float32), M)
+        # print(M)
 
-    # print(M)
-    Mc_inv = transformations.cal_affine_matrix_inverse(Mc)
+        # alternative rotation:
+        # rgb = np.fliplr(rgb.transpose())
 
-    # generate 3 channels image
-    rgb = cv2.merge((rgb, rgb, rgb))
-    # im_raw = rgb.copy()
+        Mc_inv = transformations.cal_affine_matrix_inverse(Mc)
+    else:
+        rgb = img
 
-    # convert image to unit8 with range of [0, 255]
-    rgb = rgb - rgb.min()
-    rgb = rgb.astype(np.float32)
-    rgb = (rgb / (rgb.max()) * 255).astype(np.uint8)
-    # cv2.imwrite('after_trn_temp.png',rgb)
+    if gray2rgb:
+        # generate 3 channels image
+        rgb = cv2.merge((rgb, rgb, rgb))
+        # im_raw = rgb.copy()
+
+    if scale_dynamic_range:
+        # convert image to unit8 with range of [0, 255]
+        rgb = rgb - rgb.min()
+        rgb = rgb.astype(np.float32)
+        rgb = (rgb / (rgb.max()) * 255).astype(np.uint8)
+        # cv2.imwrite('after_trn_temp.png',rgb)
 
     # detect faces
-    faces, landmarks = self.detect(rgb, FACE_DETECTION_THRESH, scales=[1.0], do_flip=False)
+    faces, landmarks = self.detect(rgb, FACE_DETECTION_THRESH, scales=scales, do_flip=do_flip)
 
     num_predictions = len(faces) if faces is not None else 0
     if verobse:
@@ -756,7 +763,6 @@ class RetinaFace:
     temp_list = []
 
     for i in range(num_predictions):
-        pred = {}
 
         box = faces[i]
         left = box[0]
@@ -765,18 +771,19 @@ class RetinaFace:
         bottom = box[3]
         box = np.array([[left, top], [right, bottom]])
 
-        # warp box points (undo 90 degrees rotations)
-        box = transformations.warp_points(box, Mc_inv).flatten()
+        if rotate90:
+            # warp box points (undo 90 degrees rotations)
+            box = transformations.warp_points(box, Mc_inv).flatten()
 
         # scale box for display
         scale_fatcor_x = 2.46  # 16.3/6
         scale_fatcor_y = 25.5 / 28.2
         trans_y = - 0
 
-        left_for_display = scale_fatcor_x * int(box[1])
-        top_for_display = scale_fatcor_y * int(box[0]) + trans_y
-        right_for_display = scale_fatcor_x * int(box[3])
-        bottom_for_display = scale_fatcor_y * int(box[2]) + trans_y
+        left_for_display = scale_fatcor_x * int(left)
+        top_for_display = scale_fatcor_y * int(top) + trans_y
+        right_for_display = scale_fatcor_x * int(right)
+        bottom_for_display = scale_fatcor_y * int(bottom) + trans_y
 
         # calculate temperature
         # option 1 - median temperature of forehead
@@ -822,7 +829,6 @@ class RetinaFace:
                                                               hist_calc_interval=self.temp_hist.hist_calc_interval)
 
 
-
         # calculate temperature histogram
         if self.temp_hist.is_initialized and (np.mod(time_stamp - self.temp_hist.start_time, self.temp_hist.hist_calc_every_N_sec) == 0) and (time_stamp - self.temp_hist.start_time > 0):
 
@@ -852,7 +858,7 @@ class RetinaFace:
 
     # compensate temperatures using dc
     if self.temp_hist.use_temperature_statistics:
-        temp_list = [self.temp_hist.estimate_temp(temp, self.temp_hist.dc_offset, measure_mu_sigma=None) for temp in temp_list]
+        temp_list = [temp - self.temp_hist.dc_offset for temp in temp_list]
         self.temp_hist.temp_th = self.temp_hist.temp_th_when_using_dc_offset
     else:
         self.temp_hist.temp_th = temp_th_hist
@@ -874,7 +880,7 @@ class RetinaFace:
 
         output_list.append(output_dict)
 
-    return output_list
+    return output_list, faces, landmarks
 
 
   def detect_center(self, img, threshold=0.5, scales=[1.0], do_flip=False):
