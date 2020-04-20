@@ -98,7 +98,7 @@ def trt_alloc_buf(engine):
 
 FACE_DETECTION_THRESH=0.2
 FACE_TEMP_PRECENTILE = [0.9, 1.0]
-GET_MAX_TEMP_IN_FACE = True
+GET_MAX_TEMP_IN_FACE = False
 
 l_ratio = 0.25
 r_ratio = 0.75
@@ -851,16 +851,18 @@ class RetinaFace:
                     = self.temp_hist.calculate_temp_statistic(time_current=time_stamp, hist_calc_interval=self.temp_hist.hist_calc_interval)
 
         # calculate temperature histogram
-
-        time_interval_from_last_temp_th_calc = time_stamp - self.temp_hist.last_time_th_calculated
+        if self.temp_hist.last_time_th_calculated is None:
+            time_interval_from_last_temp_th_calc = 0
+        else:
+            time_interval_from_last_temp_th_calc = time_stamp - self.temp_hist.last_time_th_calculated
         is_time_interval_passed = (time_interval_from_last_temp_th_calc > self.temp_hist.hist_calc_interval) and (time_stamp - self.temp_hist.start_time > 0)
         num_of_temp_samples_from_last_temp_th_calc = self.temp_hist.num_elements_in_time_interval(time_stamp, time_interval_from_last_temp_th_calc)
-        is_N_faces_detected_from_last_interval = num_of_temp_samples_from_last_temp_th_calc > self.temp_hist.N_samples_for_temp_th
+        is_N_faces_detected_from_last_interval = (num_of_temp_samples_from_last_temp_th_calc > self.temp_hist.N_samples_for_temp_th)
 
         if self.temp_hist.is_initialized and (is_time_interval_passed or is_N_faces_detected_from_last_interval):
 
             # calculate number of elements to read
-            time_interval = self.temp_hist.hist_calc_interval
+            time_interval =  self.temp_hist.hist_calc_interval  # time_interval_from_last_temp_th_calc
             num_elements_in_time_interval = self.temp_hist.num_elements_in_time_interval(time_stamp, time_interval)
 
             # if number of elements is small - multiply time interval (up to 4 times)

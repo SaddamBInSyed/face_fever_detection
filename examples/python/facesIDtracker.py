@@ -7,9 +7,9 @@ class facesIdTracker():
     def __init__(self):
 
         #Parameters:
-        self.minIouForMatch = 0.7 #this is the intersection of union threshold to match two rects.
+        self.minIouForMatch = 0.01 #this is the intersection of union threshold to match two rects.
         self.nHistoryPerFace = 50 #the maximal number of temprature measures for averaging per id
-        self.forgetAfterNframes =2 #forget faces that didnt have a match in 2 frames
+        self.forgetAfterNframes = 2 #forget faces that didnt have a match in 2 frames
         ######################
 
         self.savedFacesRect = []

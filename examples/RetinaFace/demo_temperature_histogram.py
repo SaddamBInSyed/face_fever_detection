@@ -11,7 +11,7 @@ import time
 if __name__ == '__main__':
 
     # set input and output dirs
-    input_dir = os.path.join(os.path.dirname(__file__), 'images')
+    input_dir = os.path.join(os.path.dirname(__file__), 'images_temperature')
     output_dir = os.path.join(os.path.dirname(__file__), 'images_out_temp_hist')
     os.makedirs(output_dir, exist_ok=True)
 

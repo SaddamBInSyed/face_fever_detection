@@ -208,7 +208,7 @@ class TemperatureHistogram(object):
         self.temp_th_max = temp_th_max
         self.is_initialized = False  # True after first temp_th calculation
         self.start_time = time.time()
-        self.last_time_th_calculated = -1
+        self.last_time_th_calculated = None
 
         # Initialize Cyclic Buffer
         self.shape_element = (3,)  #  each buffer element is comprised of ndarray of [time, temp, id]
@@ -221,7 +221,7 @@ class TemperatureHistogram(object):
         # initialize face tracker
         self.faces_tracker = facesIdTracker()
 
-        # initialize find temperture DC offset
+        # initialize find temperature DC offset
         self.find_DC = CFindDC()
         self.dc_offset = - 2.5  # default core-forehead temperature offset
         self.temp_th_when_using_dc_offset = 37.5
