@@ -11,7 +11,8 @@ import time
 if __name__ == '__main__':
 
     # set input and output dirs
-    input_dir = os.path.join(os.path.dirname(__file__), 'images')
+    # input_dir = os.path.join(os.path.dirname(__file__), 'images')
+    input_dir = os.path.join(os.path.dirname(__file__), 'images_temperature')
     output_dir = os.path.join(os.path.dirname(__file__), 'images_out_temp_hist')
     os.makedirs(output_dir, exist_ok=True)
 
@@ -31,14 +32,18 @@ for n, img_name in enumerate(test_dataset_list):
 
     # read image
     image_path = os.path.join(input_dir, img_name)
-    img = cv2.imread(image_path)
+    img = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
     print(img.shape)
+
+    # convert to temperature image
+    img_temperature = img * 100
 
     # detect faces
     start_t = time.time()
     # faces, landmarks = detector.detect(img, th_face, scales=scales, do_flip=flip)
+
     output_list, faces, landmarks = detector.detect_and_track_faces(img, th_face, scales=scales, do_flip=flip,
-                                                                    rotate90=False, gray2rgb=False, scale_dynamic_range=True)
+                                                                    rotate90=True, gray2rgb=True, scale_dynamic_range=True)
     end_t = time.time()
     print(faces.shape, landmarks.shape, end_t-start_t)
 

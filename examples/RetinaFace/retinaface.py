@@ -720,8 +720,8 @@ class RetinaFace:
     return det, landmarks
 
 
-  def detect_and_track_faces(self, img, threshold=0.5, scales=[1.0], do_flip=False, verobse=True,
-                             rotate90=True, gray2rgb=True, scale_dynamic_range=True):
+  def detect_and_track_faces(self, img, threshold=0.2, scales=[1.0], do_flip=False, verobse=True,
+                             rotate90=True, gray2rgb=True, scale_dynamic_range=True, display=False):
 
     if rotate90:
         # rotate image by 90 degrees
@@ -750,6 +750,18 @@ class RetinaFace:
 
     # detect faces
     faces, landmarks = self.detect(rgb, FACE_DETECTION_THRESH, scales=scales, do_flip=do_flip)
+
+    # apply threshold
+    faces_th = []
+    landmarks_th = []
+    for face, landmark in zip(faces, landmarks):
+        score = face[4]
+        if score >= threshold:
+            faces_th.append(face)
+            landmarks_th.append(landmark)
+
+    faces = faces_th
+    landmarks = landmarks_th
 
     num_predictions = len(faces) if faces is not None else 0
     if verobse:
@@ -803,7 +815,6 @@ class RetinaFace:
         # for face tracking
         faces_list.append(np.array([left, top, right, bottom]))
 
-
     # ----------------------
     # temperature statistics
     # ----------------------
@@ -813,7 +824,7 @@ class RetinaFace:
     if self.temp_hist.use_temperature_histogram:
 
         # track faces and update temperature histogram
-        self.temp_hist.update_faces_temperature(faces_list, temp_list, time_stamp)
+        id_faces, indices_faces_existing_ids = self.temp_hist.update_faces_temperature(faces_list, temp_list, time_stamp)
 
         # initialize temp_th
         if not self.temp_hist.is_initialized and (self.temp_hist.buffer.getNumOfElementsToRead() > self.temp_hist.N_samples_for_first_temp_th):
@@ -863,9 +874,16 @@ class RetinaFace:
     else:
         self.temp_hist.temp_th = temp_th_hist
 
-   # ----------------------
+    # ----------------------
+    # display (for debug)
+    # ----------------------
+    if display:
+        pass
 
+
+    # ----------------------
     # calculate output
+    # ----------------------
     output_list = []
     for n in range(len(faces_list)):
 
