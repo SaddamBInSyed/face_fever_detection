@@ -848,8 +848,7 @@ class RetinaFace:
 
                 # calculate dc offset
                 self.temp_hist.dc_offset, measure_mu_sigma \
-                    = self.temp_hist.calculate_temp_statistic(temp, time_current=time_stamp,
-                                                              hist_calc_interval=self.temp_hist.hist_calc_interval)
+                    = self.temp_hist.calculate_temp_statistic(time_current=time_stamp, hist_calc_interval=self.temp_hist.hist_calc_interval)
 
         # calculate temperature histogram
         if self.temp_hist.is_initialized and (np.mod(time_stamp - self.temp_hist.start_time, self.temp_hist.hist_calc_every_N_sec) == 0) and (time_stamp - self.temp_hist.start_time > 0):
@@ -873,8 +872,7 @@ class RetinaFace:
 
                 if self.temp_hist.use_temperature_statistics:
                     self.temp_hist.dc_offset, measure_mu_sigma\
-                        = self.temp_hist.calculate_temp_statistic(temp, time_current=time_stamp,
-                                                                  hist_calc_interval=self.temp_hist.hist_calc_interval)
+                        = self.temp_hist.calculate_temp_statistic(time_current=time_stamp, hist_calc_interval=self.temp_hist.hist_calc_interval)
         else:
             temp_th_hist = self.temp_hist.temp_th
 

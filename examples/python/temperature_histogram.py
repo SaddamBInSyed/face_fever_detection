@@ -227,7 +227,7 @@ class TemperatureHistogram(object):
 
         #
         self.use_temperature_histogram = True
-        self.use_temperature_statistics = False
+        self.use_temperature_statistics = True
 
         # temperature statistics
         self.prior_mu_sigma = (36.77, 0.6)
@@ -296,7 +296,7 @@ class TemperatureHistogram(object):
 
         return time_vec, temp_vec, id_vec, N
 
-    def calculate_temp_statistic(self, curr_measure, time_current, hist_calc_interval=None):
+    def calculate_temp_statistic(self, time_current, hist_calc_interval=None):
 
         time_vec_all, temp_vec_all, id_vec_all, N = self.read_N_elements(self.buffer.length)
 
