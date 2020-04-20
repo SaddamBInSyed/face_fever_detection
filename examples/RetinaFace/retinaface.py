@@ -833,6 +833,7 @@ class RetinaFace:
 
     # track faces
     time_stamp = time.time()
+    id_faces, indices_faces_existing_ids = [], []
     if self.temp_hist.use_temperature_histogram:
 
         # track faces and update temperature histogram
@@ -855,7 +856,7 @@ class RetinaFace:
             time_interval_from_last_temp_th_calc = 0
         else:
             time_interval_from_last_temp_th_calc = time_stamp - self.temp_hist.last_time_th_calculated
-        is_time_interval_passed = (time_interval_from_last_temp_th_calc > self.temp_hist.hist_calc_interval) and (time_stamp - self.temp_hist.start_time > 0)
+        is_time_interval_passed = (time_interval_from_last_temp_th_calc > self.temp_hist.hist_calc_every_N_sec) and (time_stamp - self.temp_hist.start_time > 0)
         num_of_temp_samples_from_last_temp_th_calc = self.temp_hist.num_elements_in_time_interval(time_stamp, time_interval_from_last_temp_th_calc)
         is_N_faces_detected_from_last_interval = (num_of_temp_samples_from_last_temp_th_calc > self.temp_hist.N_samples_for_temp_th)
 
@@ -932,6 +933,9 @@ class RetinaFace:
   def display_boxes(img, boxes, temp_list, id_faces, indices_faces_existing_ids, scale=1.):
 
     existing_faces_flags = np.isin(np.arange(len(temp_list)), indices_faces_existing_ids)
+
+    if len(id_faces) == 0:
+        id_faces = [-1 for t in temp_list] # generate fake ids
 
     color_new = (0, 255, 0)
     color_exist = (0, 0, 255)

@@ -188,9 +188,9 @@ class TemperatureHistogram(object):
     def __init__(self,
                  hist_calc_interval=30 * 60, # [sec]
                  buffer_max_len=120*60*1,  # [minutes * sec * persons_per_sec]
-                 hist_percentile=0.85,  # [%]
-                 N_samples_for_temp_th=30,
-                 N_samples_for_first_temp_th=20,
+                 hist_percentile=0.9,  # [%]
+                 N_samples_for_temp_th=30,  #300, #30,
+                 N_samples_for_first_temp_th=15,  # 50, # 20,
                  temp_th_nominal=34.0,
                  temp_th_min=30.0,
                  temp_th_max=36.0,

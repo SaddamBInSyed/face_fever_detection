@@ -13,6 +13,7 @@ if __name__ == '__main__':
     # set input and output dirs
     input_dir = os.path.join(os.path.dirname(__file__), 'images_temperature')
     output_dir = os.path.join(os.path.dirname(__file__), 'images_out_temp_hist')
+    # output_dir = os.path.join(os.path.dirname(__file__), 'images_out_temp_hist_offset')
     os.makedirs(output_dir, exist_ok=True)
 
     th_face = 0.1  # 0.8
