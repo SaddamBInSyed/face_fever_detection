@@ -19,6 +19,7 @@ if __name__ == '__main__':
     th_face = 0.1  # 0.8
     scales = [1.0]
     flip = False
+    display = True
 
     # initialize detector
     gpuid = -1  # -1 - use cpu
@@ -42,35 +43,13 @@ for n, img_name in enumerate(test_dataset_list):
     start_t = time.time()
     # faces, landmarks = detector.detect(img, th_face, scales=scales, do_flip=flip)
 
-    output_list, faces, landmarks = detector.detect_and_track_faces(img, th_face, scales=scales, do_flip=flip,
-                                                                    rotate90=True, gray2rgb=True, scale_dynamic_range=True)
+    output_list, faces, landmarks, img_out = detector.detect_and_track_faces(img_temperature, th_face, scales=scales, do_flip=flip,
+                                                                    rotate90=True, gray2rgb=True, scale_dynamic_range=True, display=display)
     end_t = time.time()
-    print(faces.shape, landmarks.shape, end_t-start_t)
-
-    # display
-    if faces is not None and len(faces) > 0:
-
-        print('find', faces.shape[0], 'faces')
-
-        # display faces
-        for m in range(faces.shape[0]):
-            #print('score', faces[i][4])
-            box = faces[m].astype(np.int)
-            #color = (255,0,0)
-            color = (0,0,255)
-            cv2.rectangle(img, (box[0], box[1]), (box[2], box[3]), color, 2)
-
-            # display landmarks
-            if landmarks is not None:
-                landmark5 = landmarks[m].astype(np.int)
-                #print(landmark.shape)
-                for l in range(landmark5.shape[0]):
-                    color = (0,0,255)
-                    if l==0 or l==3:
-                        color = (0,255,0)
-                    cv2.circle(img, (landmark5[l][0], landmark5[l][1]), 1, color, 2)
+    print(len(faces), end_t-start_t)
 
     # save image
-    filename = os.path.join(output_dir, img_name)
-    print('writing', filename)
-    cv2.imwrite(filename, img)
+    if display:
+        filename = os.path.join(output_dir, img_name)
+        print('writing', filename)
+        cv2.imwrite(filename, img_out)

@@ -5,6 +5,7 @@ import datetime
 import time
 import numpy as np
 import cv2
+import copy
 #from rcnn import config
 from rcnn.logger import logger
 #from rcnn.processing.bbox_transform import nonlinear_pred, clip_boxes, landmark_pred
@@ -97,6 +98,7 @@ def trt_alloc_buf(engine):
 
 FACE_DETECTION_THRESH=0.2
 FACE_TEMP_PRECENTILE = [0.9, 1.0]
+GET_MAX_TEMP_IN_FACE = True
 
 l_ratio = 0.25
 r_ratio = 0.75
@@ -140,7 +142,7 @@ def calc_temp_median_of_rect(img, box):
     return temp_raw, forehead_bb
 
 
-def calc_temp_precentile(img, box):
+def calc_temp_precentile(img, box, max_value=False):
 
     top = int(box[1])
     left = int(box[0])
@@ -152,8 +154,13 @@ def calc_temp_precentile(img, box):
     ver_start = int(top)
     ver_end = int(bottom)
 
-    temp_raw = calc_precentile(img[ver_start:ver_end, hor_start:hor_end], q_min=FACE_TEMP_PRECENTILE[0],
-                               q_max=FACE_TEMP_PRECENTILE[1])
+    face_box = img[ver_start:ver_end, hor_start:hor_end]
+
+    if max_value:
+        temp_raw = face_box.max()
+    else:
+        temp_raw = calc_precentile(img[ver_start:ver_end, hor_start:hor_end], q_min=FACE_TEMP_PRECENTILE[0], q_max=FACE_TEMP_PRECENTILE[1])
+
     return temp_raw
 
 
@@ -347,6 +354,8 @@ class RetinaFace:
         self.mxmodel.forward(db, is_train=False)
         net_out = self.mxmodel.get_outputs()
 
+        net_out = [net.asnumpy() for net in net_out]
+
         return net_out
 
 
@@ -499,7 +508,7 @@ class RetinaFace:
               #if self.vote and stride==4 and len(scales)>2 and (im_scale==scales[0]):
               #  continue
               #print('getting', im_scale, stride, idx, len(net_out), data.shape, file=sys.stderr)
-              scores = net_out[sym_idx].asnumpy()
+              scores = net_out[sym_idx]
               if self.debug:
                 timeb = datetime.datetime.now()
                 diff = timeb - timea
@@ -508,7 +517,7 @@ class RetinaFace:
               #print('scores',stride, scores.shape, file=sys.stderr)
               scores = scores[:, self._num_anchors['stride%s'%s]:, :, :]
 
-              bbox_deltas = net_out[sym_idx+1].asnumpy()
+              bbox_deltas = net_out[sym_idx+1]
 
               #if DEBUG:
               #    print 'im_size: ({}, {})'.format(im_info[0], im_info[1])
@@ -560,7 +569,7 @@ class RetinaFace:
                 for diff_idx in __idx:
                   if sym_idx+diff_idx>=len(net_out):
                     break
-                  body = net_out[sym_idx+diff_idx].asnumpy()
+                  body = net_out[sym_idx+diff_idx]
                   if body.shape[1]//A==2: #cls branch
                     if cls_cascade or bbox_cascade:
                       break
@@ -628,7 +637,7 @@ class RetinaFace:
                 strides_list.append(_strides)
 
               if not self.vote and self.use_landmarks:
-                landmark_deltas = net_out[sym_idx+2].asnumpy()
+                landmark_deltas = net_out[sym_idx+2]
                 #landmark_deltas = self._clip_pad(landmark_deltas, (height, width))
                 landmark_pred_len = landmark_deltas.shape[1]//A
                 landmark_deltas = landmark_deltas.transpose((0, 2, 3, 1)).reshape((-1, 5, landmark_pred_len//5))
@@ -726,15 +735,15 @@ class RetinaFace:
     if rotate90:
         # rotate image by 90 degrees
         M = transformations.calculate_affine_matrix(rotation_angle=-90, rotation_center=(0, 0), translation=(0, 0), scale=1)
-        rgb, Mc = transformations.warp_affine_without_crop(img.astype(np.float32), M)
+        img, Mc = transformations.warp_affine_without_crop(copy.deepcopy(img).astype(np.float32), M)
         # print(M)
 
         # alternative rotation:
         # rgb = np.fliplr(rgb.transpose())
 
         Mc_inv = transformations.cal_affine_matrix_inverse(Mc)
-    else:
-        rgb = img
+
+    rgb = copy.deepcopy(img)
 
     if gray2rgb:
         # generate 3 channels image
@@ -802,7 +811,7 @@ class RetinaFace:
         # temp, forehead = calc_temp_median_of_rect(img, faces[i])
 
         # option 2 - calculate temperature using percentiles
-        temp = calc_temp_precentile(img, faces[i])
+        temp = calc_temp_precentile(img, faces[i], max_value=GET_MAX_TEMP_IN_FACE)
         temp = np.round(temp, 1)
 
         # save face boxes and temperatures
@@ -839,7 +848,6 @@ class RetinaFace:
                     = self.temp_hist.calculate_temp_statistic(temp, time_current=time_stamp,
                                                               hist_calc_interval=self.temp_hist.hist_calc_interval)
 
-
         # calculate temperature histogram
         if self.temp_hist.is_initialized and (np.mod(time_stamp - self.temp_hist.start_time, self.temp_hist.hist_calc_every_N_sec) == 0) and (time_stamp - self.temp_hist.start_time > 0):
 
@@ -864,8 +872,11 @@ class RetinaFace:
                     self.temp_hist.dc_offset, temp_after_offset, temp_estimation, temp_probability \
                         = self.temp_hist.calculate_temp_statistic(temp, time_current=time_stamp,
                                                                   hist_calc_interval=self.temp_hist.hist_calc_interval)
-            else:
-                temp_th_hist = self.temp_hist.temp_th_nominal
+        else:
+            temp_th_hist = self.temp_hist.temp_th
+
+    else:
+        temp_th_hist = self.temp_hist.temp_th_nominal
 
     # compensate temperatures using dc
     if self.temp_hist.use_temperature_statistics:
@@ -878,8 +889,16 @@ class RetinaFace:
     # display (for debug)
     # ----------------------
     if display:
-        pass
 
+        img_display = copy.copy(rgb)
+
+        if len(faces_list) > 0:
+            # display boxes
+            img_display = RetinaFace.display_boxes(img_display, faces_list, temp_list, id_faces, indices_faces_existing_ids)
+            # cv2.imshow('', img_display)
+            # cv2.waitKey(0)
+    else:
+        img_display = None
 
     # ----------------------
     # calculate output
@@ -898,8 +917,37 @@ class RetinaFace:
 
         output_list.append(output_dict)
 
-    return output_list, faces, landmarks
+    return output_list, faces, landmarks, img_display
 
+  @staticmethod
+  def display_boxes(img, boxes, temp_list, id_faces, indices_faces_existing_ids, scale=1.):
+
+    existing_faces_flags = np.isin(np.arange(len(temp_list)), indices_faces_existing_ids)
+
+    color_new = (0, 255, 0)
+    color_exist = (0, 0, 255)
+    width = 2
+
+    for box, temp, id, is_exist in zip(boxes, temp_list, id_faces, existing_faces_flags):
+
+        color = color_exist if is_exist else color_new
+
+        box = box[:4] * scale
+
+        left = int(box[0])
+        top = int(box[1])
+        right = int(box[2])
+        bottom = int(box[3])
+
+        # draw face box
+        cv2.rectangle(img, (left, top), (right, bottom), color, width)
+
+        # add id : temp
+        text = '{}: {:.1f}'.format(int(id), np.round(temp, 1))
+
+        cv2.putText(img=img, text=text, org=(left, top - 5), fontFace=cv2.FONT_HERSHEY_PLAIN, fontScale=1.1, color=color, thickness=1)
+
+    return img
 
   def detect_center(self, img, threshold=0.5, scales=[1.0], do_flip=False):
     det, landmarks = self.detect(img, threshold, scales, do_flip)

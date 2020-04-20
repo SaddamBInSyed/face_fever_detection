@@ -227,7 +227,7 @@ class TemperatureHistogram(object):
 
         #
         self.use_temperature_histogram = True
-        self.use_temperature_statistics = True
+        self.use_temperature_statistics = False
 
         # temperature statistics
         self.prior_mu_sigma = (36.77, 0.6)
@@ -715,6 +715,7 @@ def show_boxes(im, two_d_current_frame_faces, temp_list, id_faces, existing_face
 
     plt.show()
     return im
+
 
 def display_new_people_on_image(image, image_id, current_frame_faces, temp_list, id_faces, indices_faces_existing_ids, display=True):
 
