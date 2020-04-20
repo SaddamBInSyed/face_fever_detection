@@ -207,7 +207,7 @@ class TemperatureHistogram(object):
         self.temp_th_min = temp_th_min
         self.temp_th_max = temp_th_max
         self.is_initialized = False  # True after first temp_th calculation
-        self.temp_hist.start_time = time.time()
+        self.start_time = time.time()
 
         # Initialize Cyclic Buffer
         self.shape_element = (3,)  #  each buffer element is comprised of ndarray of [time, temp, id]
@@ -230,25 +230,8 @@ class TemperatureHistogram(object):
         self.use_temperature_statistics = True
 
         # temperature statistics
-        # sigma_prior = 0.6
-        # sigma_measure = 0.4
-        # temps = np.linspace(34, 42, 50)
-        #
-        # temp_samples = np.random.normal(36.77, sigma_prior, (10000, 1))
-        # hist_temp = np.histogram(temp_samples, bins=temps)
-        # nominal_temp_pdf = np.double(hist_temp[0]) / hist_temp[0].sum()
-        #
-        # # needs to be shifted according to measure by curr_measure - offset
-        # measure_given_temp_sample = np.random.normal(0, sigma_measure, (10000, 1))
-        # hist_measure_given_temp = np.histogram(measure_given_temp_sample, bins=temps)
-        # measure_given_temp_pdf = np.double(hist_measure_given_temp[0]) / hist_measure_given_temp[0].sum()
-
-
-
-
-
-
-
+        self.prior_mu_sigma = (36.77, 0.6)
+        self.sigma_measure_given_temp = 0.4
 
     def write_sample(self, time_stamp, temp, id=[None]):
 
@@ -325,43 +308,46 @@ class TemperatureHistogram(object):
         temp_vec = temp_vec_all[ind]
         dcMaxLike, dcMeanLike = self.find_DC.findDC(temp_vec)
         offset = dcMaxLike
+        temp_after_offset = []
+        temp_est = []
+        temp_prob = []
 
-        if 0:
-            measure_mean = np.mean(temp_vec)
-            measure_std = np.std(temp_vec)
-            # curr_measure = temp_vec[-1]
+        measure_mean = np.mean(temp_vec)
+        measure_std = np.std(temp_vec)
 
-            epsilon = 0.02
-            sigma_prior = 0.6
-            sigma_measure = 0.4
-            temp = np.linspace(31, 42, 100)
-            measure_given_temp_sample = np.random.normal(curr_measure - offset, sigma_measure, (1000000, 1))
-            hist_measure_given_temp =  np.histogram(measure_given_temp_sample, bins=temp)
-            p_measure_given_temp = np.double(hist_measure_given_temp[0])/hist_measure_given_temp[0].sum()
-            p_measure = (erf((curr_measure + epsilon - measure_mean) / (measure_std*np.sqrt(2))) - erf((curr_measure - epsilon - measure_mean) / (measure_std*np.sqrt(2)))) / 2
-            # measure_sample = np.random.normal(curr_measure - offset, 0.7, (100000, 1))
+        temp_after_offset = curr_measure - offset
 
+        epsilon = 0.02
+        mu_prior = 36.77
+        mu_measure = temp_after_offset
+        sigma_prior = 0.6
+        sigma_measure = 0.4
 
-            temp_samples = np.random.normal(36.77, sigma_prior, (1000000, 1))
-            hist_temp =np.histogram(temp_samples, bins=temp)
-            p_temp = np.double(hist_temp[0])/hist_temp[0].sum()
-            p_temp_given_measure = p_temp * p_measure_given_temp / p_measure
-            # p_temp_given_measure = p_temp_given_measure / p_temp_given_measure.sum()
+        measure_mu_sigma = (measure_mean, measure_std)
 
-            ind = np.argmax(p_temp_given_measure)
-            temp_est = temp[ind]
-            temp_prob = p_temp_given_measure[ind]
-            temp_after_offset = curr_measure - offset
+        joined_mu = (mu_prior * sigma_measure ** 2 + mu_measure * sigma_prior ** 2) / (sigma_prior ** 2 + sigma_measure ** 2)
+        joined_sigma = np.sqrt(sigma_prior ** 2 * sigma_measure ** 2 / (sigma_prior ** 2 + sigma_measure ** 2))
 
-            if temp_prob == 0:
-                temp_est = temp_after_offset
-            return offset, temp_after_offset, temp_est, temp_prob
-        else:
-            temp_after_offset = []
-            temp_est = []
-            temp_prob = []
+        temp_est = joined_mu
 
-        return offset, temp_after_offset, temp_est, temp_prob
+        # if temp_prob == 0:
+        #     temp_est = temp_after_offset
+
+        # return offset, temp_after_offset, temp_est, temp_prob
+        return offset, measure_mu_sigma
+
+    def estimate_temp(self, curr_temp_measure, offset, measure_mu_sigma):
+        mu_prior = self.prior_mu_sigma[0]
+        sigma_prior = self.prior_mu_sigma[1]
+        mu_measure = curr_temp_measure - offset
+        sigma_measure_given_temp = self.sigma_measure_given_temp
+
+        joined_mu = (mu_prior * sigma_measure_given_temp ** 2 + mu_measure * sigma_prior ** 2) / (sigma_prior ** 2 + sigma_measure_given_temp ** 2)
+        joined_sigma = np.sqrt(sigma_prior ** 2 * sigma_measure_given_temp ** 2 / (sigma_prior ** 2 + sigma_measure_given_temp ** 2))
+
+        temp_estimation = joined_mu
+
+        return temp_estimation
 
     def write_elements(self, time_vec, temp_vec, id_vec):
 
@@ -799,15 +785,19 @@ def main_simple_temperature_histogram():
             # write temp and time_stamp to buffer
             temp_hist.write_sample(temp=temp, time_stamp=time_stamp)
 
+            temp_estimation = temp_hist.estimate_temp(temp, temp_hist.dc_offset, measure_mu_sigma=None)
+
         # initalize temp_th
         if not temp_hist.is_initialized and (temp_hist.buffer.getNumOfElementsToRead() > temp_hist.N_samples_for_first_temp_th):
             temp_th = temp_hist.calculate_temperature_threshold(time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval, display=display)
-            dc_offset, temp_after_offset, temp_estimation, temp_probability = temp_hist.calculate_temp_statistic(temp, time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval)
+            temp_hist.dc_offset, measure_mu_sigma = temp_hist.calculate_temp_statistic(temp, time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval)
+            temp_estimation = temp_hist.estimate_temp(temp, temp_hist.dc_offset, measure_mu_sigma=None)
 
         # calculate temperature histogram
         if (np.mod(n, temp_hist.hist_calc_interval) == 0) and (n > 0) and (temp_hist.buffer.getNumOfElementsToRead() > temp_hist.N_samples_for_first_temp_th):
             temp_th = temp_hist.calculate_temperature_threshold(time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval, display=display)
-            dc_offset, temp_after_offset, temp_estimation, temp_probability = temp_hist.calculate_temp_statistic(temp, time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval)
+            temp_hist.dc_offset, measure_mu_sigma = temp_hist.calculate_temp_statistic(temp, time_current=time_current, hist_calc_interval=temp_hist.hist_calc_interval)
+            temp_estimation = temp_hist.estimate_temp(temp, temp_hist.dc_offset, measure_mu_sigma=None)
 
 
     print ('Done')

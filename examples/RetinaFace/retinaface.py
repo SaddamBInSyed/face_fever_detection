@@ -725,6 +725,9 @@ class RetinaFace:
     # rotate image by 90 degrees
     M = transformations.calculate_affine_matrix(rotation_angle=-90, rotation_center=(0, 0), translation=(0, 0), scale=1)
     rgb, Mc = transformations.warp_affine_without_crop(img.astype(np.float32), M)
+    # alternative rotation:
+    # rgb = np.fliplr(rgb.transpose())
+
     # print(M)
     Mc_inv = transformations.cal_affine_matrix_inverse(Mc)
 
@@ -819,6 +822,7 @@ class RetinaFace:
                                                               hist_calc_interval=self.temp_hist.hist_calc_interval)
 
 
+
         # calculate temperature histogram
         if self.temp_hist.is_initialized and (np.mod(time_stamp - self.temp_hist.start_time, self.temp_hist.hist_calc_every_N_sec) == 0) and (time_stamp - self.temp_hist.start_time > 0):
 
@@ -848,7 +852,7 @@ class RetinaFace:
 
     # compensate temperatures using dc
     if self.temp_hist.use_temperature_statistics:
-        temp_list = [temp - self.temp_hist.dc_offset for temp in temp_list]
+        temp_list = [self.temp_hist.estimate_temp(temp, self.temp_hist.dc_offset, measure_mu_sigma=None) for temp in temp_list]
         self.temp_hist.temp_th = self.temp_hist.temp_th_when_using_dc_offset
     else:
         self.temp_hist.temp_th = temp_th_hist
