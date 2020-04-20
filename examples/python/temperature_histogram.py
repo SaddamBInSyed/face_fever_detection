@@ -255,6 +255,7 @@ class TemperatureHistogram(object):
         measure_std = np.std(temp_vec)
         # curr_measure = temp_vec[-1]
 
+
         epsilon = 0.02
         sigma_prior = 0.6
         sigma_measure = 0.4
@@ -265,6 +266,20 @@ class TemperatureHistogram(object):
         p_measure = (erf((curr_measure + epsilon - measure_mean) / (measure_std*np.sqrt(2))) - erf((curr_measure - epsilon - measure_mean) / (measure_std*np.sqrt(2)))) / 2
         # measure_sample = np.random.normal(curr_measure - offset, 0.7, (100000, 1))
 
+        ########################
+        mu1 = 36.77
+        mu2 = curr_measure - offset
+        joined_mu = (mu1 * sigma_measure ** 2 + mu2 * sigma_prior ** 2) / (sigma_prior ** 2 + sigma_measure ** 2)
+        joined_sigma = np.sqrt(sigma_prior ** 2 * sigma_measure ** 2 / (sigma_prior ** 2 + sigma_measure ** 2))
+
+        nomi = erf(epsilon / (joined_sigma * np.sqrt(2)))
+
+
+
+        nominator = 1 / (joined_sigma * np.sqrt(2 * np.pi))
+        denominator = 1 / (measure_std * np.sqrt(2 * np.pi)) * np.exp(
+            -(curr_measure - measure_mean) ** 2 / (2 * measure_std ** 2))
+        #########################
 
         temp_samples = np.random.normal(36.77, sigma_prior, (1000000, 1))
         hist_temp =np.histogram(temp_samples, bins=temp)
